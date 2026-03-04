@@ -106,8 +106,10 @@ class SettingFragment : Fragment() {
      * 💖 核心新增：手动触发版本检查逻辑
      */
     private fun manualCheckUpdate() {
-        val fullCommand = UserPrefs.getRemoteCommand(requireContext())
-        // 尝试解析最后一次收到的 OTA 指令
+        // 1. 获取指令，增加 ?: "" 防止空指针异常
+        val fullCommand = UserPrefs.getRemoteCommand(requireContext()) ?: ""
+
+        // 2. 尝试解析最后一次收到的 OTA 指令
         if (fullCommand.startsWith("ota_update|")) {
             val parts = fullCommand.split("|")
             if (parts.size >= 5) {
@@ -115,20 +117,23 @@ class SettingFragment : Fragment() {
                     val serverCode = parts[1].toInt()
                     val versionName = parts[2]
                     val updateLog = parts[3].replace("\\n", "\n")
-                    val downloadUrl = parts[4]
 
-                    // 调用手动检查方法，跳过忽略逻辑直接弹窗
+                    // 💖 优化点：考虑到极端情况下 URL 本身可能包含 "|" 字符
+                    // 我们把第 4 项之后的所有内容重新拼接回完整的 URL
+                    val downloadUrl = parts.subList(4, parts.size).joinToString("|")
+
+                    // 调用手动检查方法，它内部会自动判断 serverCode 是否大于当前版本
                     updateManager.manualCheckShow(serverCode, versionName, updateLog, downloadUrl)
-                    return
+                    return // 成功触发弹窗/检查后，直接退出函数
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    e.printStackTrace() // 解析失败（比如版本号不是数字）则静默捕获，走到最下面的 Toast
                 }
             }
         }
-        // 如果没有 OTA 指令或解析失败
+
+        // 3. 如果最后一条指令根本不是 OTA (比如是 lock_screen)，或者解析意外失败
         Toast.makeText(requireContext(), "当前已是最新版本", Toast.LENGTH_SHORT).show()
     }
-
     private fun showNotifManageDialog() {
         val scroll = ScrollView(requireContext())
         val layout = LinearLayout(requireContext()).apply {

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.widget.Toast
+import androidx.core.content.ContextCompat // 💖 新增导入：用于完美兼容各版本广播注册
 import androidx.core.content.FileProvider
 import cn.xtay.lovejournal.BuildConfig
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -76,18 +77,28 @@ class UpdateManager(private val context: Context) {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val downloadId = dm.enqueue(request)
 
-            // 注册下载完成广播监听
-            context.applicationContext.registerReceiver(object : BroadcastReceiver() {
+            // 💖 修复点 1：将广播接收器提取为变量，方便安全注销
+            val onDownloadComplete = object : BroadcastReceiver() {
                 override fun onReceive(c: Context?, intent: Intent?) {
                     val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                     if (id == downloadId) {
                         // 下载完成，直接获取 Uri 并安装
                         val apkUri = dm.getUriForDownloadedFile(downloadId)
                         installApk(apkUri)
-                        context.unregisterReceiver(this) // 注销监听，防止内存泄漏
+                        // 💖 修复点 2：使用 applicationContext 注销，避免内存泄漏
+                        context.applicationContext.unregisterReceiver(this)
                     }
                 }
-            }, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            }
+
+            // 💖 修复点 3：使用 ContextCompat 注册，并添加 RECEIVER_EXPORTED 标志
+            // 因为系统 DownloadManager 属于外部服务，必须显式声明 EXPORTED 才能接收它的广播
+            ContextCompat.registerReceiver(
+                context.applicationContext,
+                onDownloadComplete,
+                IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                ContextCompat.RECEIVER_EXPORTED
+            )
 
             Toast.makeText(context, "已启动后台下载，请查看通知栏进度", Toast.LENGTH_LONG).show()
 
