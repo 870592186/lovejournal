@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="服务器设置"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp"
+        android:textColor="#333333"/>
+
+    <RadioGroup
+        android:id="@+id/rg_server_choice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <RadioButton
+            android:id="@+id/rb_official"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="官方服务器 (https://x.xtay.cn/)"
+            android:padding="8dp"/>
+
+        <RadioButton
+            android:id="@+id/rb_custom"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="自定义自建服务器"
+            android:padding="8dp"/>
+    </RadioGroup>
+
+    <LinearLayout
+        android:id="@+id/layout_custom_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:layout_marginTop="12dp">
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="输入 API 地址 (包含 http/https)">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_server_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri"
+                android:textSize="14sp" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_test_conn"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:text="检测连通性"
+            android:textColor="#2196F3" />
+    </LinearLayout>
+
+</LinearLayout>

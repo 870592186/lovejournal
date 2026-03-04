@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">情侣手记</string>
+    <string name="accessibility_desc">用于情侣手记后台坐标同步，确保位置不掉线。</string>
+</resources>

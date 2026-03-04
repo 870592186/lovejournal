@@ -1,0 +1,134 @@
+package cn.xtay.lovejournal.util
+
+import android.app.DownloadManager
+import android.content.*
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import cn.xtay.lovejournal.BuildConfig
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import java.io.File
+
+class UpdateManager(private val context: Context) {
+
+    companion object {
+        // 💖 内存标志位：控制“稍后提醒”逻辑
+        // 只要 App 进程还在，点过稍后就不再弹窗，直到下次 App 彻底重启
+        var isDelayedInSession = false
+    }
+
+    /**
+     * 核心方法：检查并显示更新弹窗
+     */
+    fun checkAndShowDialog(serverCode: Int, versionName: String, log: String, url: String) {
+        val localCode = BuildConfig.VERSION_CODE
+        val ignoredVersion = UserPrefs.getIgnoredVersion(context)
+
+        // 🔴 拦截 1：如果已经是最新版或更高，不弹
+        if (serverCode <= localCode) return
+
+        // 🔴 拦截 2：如果版本号等于用户点过“忽略”的版本，不弹
+        if (serverCode == ignoredVersion) return
+
+        // 🔴 拦截 3：如果用户在本次运行期间点过“稍后”，不弹
+        if (isDelayedInSession) return
+
+        // 🟢 满足所有条件，弹出 Material 对话框
+        MaterialAlertDialogBuilder(context)
+            .setTitle("发现新版本 $versionName")
+            .setMessage(log.ifEmpty { "检测到重要更新，建议立即升级体验最新功能。" })
+            .setCancelable(false) // 强制用户必须选一个
+            .setPositiveButton("立即升级") { _, _ ->
+                startDownload(url, versionName)
+            }
+            .setNeutralButton("以后再说") { _, _ ->
+                // 设置内存标志位，本次运行不再骚扰
+                isDelayedInSession = true
+                Toast.makeText(context, "将在下次启动时再次提醒您", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("忽略此版本") { _, _ ->
+                // 记录忽略的版本号到本地
+                UserPrefs.saveIgnoredVersion(context, serverCode)
+                Toast.makeText(context, "已忽略该版本", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    /**
+     * 调用系统下载管理器进行下载
+     */
+    private fun startDownload(url: String, versionName: String) {
+        try {
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setTitle("正在下载情侣手记 $versionName")
+                setDescription("版本升级中，完成后将自动安装")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+
+                // 下载到系统公共目录
+                val fileName = "LoveJournal_Update_${versionName}.apk"
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+
+                setMimeType("application/vnd.android.package-archive")
+            }
+
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val downloadId = dm.enqueue(request)
+
+            // 注册下载完成广播监听
+            context.applicationContext.registerReceiver(object : BroadcastReceiver() {
+                override fun onReceive(c: Context?, intent: Intent?) {
+                    val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+                    if (id == downloadId) {
+                        // 下载完成，直接获取 Uri 并安装
+                        val apkUri = dm.getUriForDownloadedFile(downloadId)
+                        installApk(apkUri)
+                        context.unregisterReceiver(this) // 注销监听，防止内存泄漏
+                    }
+                }
+            }, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+
+            Toast.makeText(context, "已启动后台下载，请查看通知栏进度", Toast.LENGTH_LONG).show()
+
+        } catch (e: Exception) {
+            Toast.makeText(context, "下载异常: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 调起系统安装页面
+     */
+    private fun installApk(uri: Uri?) {
+        if (uri == null) return
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            setDataAndType(uri, "application/vnd.android.package-archive")
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "无法唤起安装器，请到下载管理手动安装", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * 供设置页面手动检查更新使用的无拦截弹窗
+     */
+    fun manualCheckShow(serverCode: Int, versionName: String, log: String, url: String) {
+        val localCode = BuildConfig.VERSION_CODE
+        if (serverCode <= localCode) {
+            Toast.makeText(context, "当前已是最新版本", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 手动检查时不检查忽略版本和稍后标志位，直接弹
+        MaterialAlertDialogBuilder(context)
+            .setTitle("检查到更新 $versionName")
+            .setMessage(log)
+            .setPositiveButton("立即下载") { _, _ -> startDownload(url, versionName) }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+}

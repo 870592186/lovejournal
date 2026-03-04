@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+            <View android:layout_width="4dp" android:layout_height="18dp" android:background="#FF5252" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:text="另一半的实时状态" android:textColor="?attr/colorOnSurface" android:textSize="15sp" android:textStyle="bold" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.Material3.CardView.Elevated"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            app:cardCornerRadius="20dp">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="当前电量" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="13sp" />
+                    <TextView android:id="@+id/tv_partner_battery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="--%" android:textColor="#FF5252" android:textSize="18sp" android:textStyle="bold" />
+                </RelativeLayout>
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progress_partner_battery" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_marginBottom="24dp" app:indicatorColor="#FF5252" app:trackColor="#FFEAEA" app:trackThickness="8dp" app:trackCornerRadius="4dp" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_location" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_partner_net" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="网络：正在同步..." android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_device" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_partner_app" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="状态：正在同步..." android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_heart" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_partner_steps" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="今日步数：--" android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:id="@+id/view_mic_indicator" android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_mic" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_mic_status" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="麦克风：闲置" android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+            <View android:layout_width="4dp" android:layout_height="18dp" android:background="#2196F3" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:text="我的设备状态" android:textColor="?attr/colorOnSurface" android:textSize="15sp" android:textStyle="bold" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.Material3.CardView.Elevated"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            app:cardCornerRadius="20dp">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+
+                <RelativeLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="本机电量" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="13sp" />
+                    <TextView android:id="@+id/tv_my_battery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentEnd="true" android:text="--%" android:textColor="#2196F3" android:textSize="18sp" android:textStyle="bold" />
+                </RelativeLayout>
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progress_my_battery" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:layout_marginBottom="24dp" app:indicatorColor="#2196F3" app:trackColor="#E3F2FD" app:trackThickness="8dp" app:trackCornerRadius="4dp" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_location" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_my_net" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="网络：读取中..." android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_device" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_my_app" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="状态：读取中..." android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_heart" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_my_steps" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="今日步数：--" android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+                    <ImageView android:id="@+id/view_my_mic_indicator" android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/ic_mic" app:tint="?attr/colorOnSurfaceVariant" />
+                    <TextView android:id="@+id/tv_my_mic_status" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="16dp" android:text="麦克风：闲置" android:textColor="?attr/colorOnSurface" android:textSize="14sp" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            android:id="@+id/tv_sync_hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="8dp" android:text="数据自动同步中" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="11sp" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

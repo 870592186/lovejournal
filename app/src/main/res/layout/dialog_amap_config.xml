@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="高德地图 API 配置"
+        android:textColor="#333333"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp"/>
+
+    <RadioGroup
+        android:id="@+id/rg_amap_choice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <RadioButton
+            android:id="@+id/rb_amap_official"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="使用官方内置 Key"
+            android:textSize="15sp" />
+
+        <RadioButton
+            android:id="@+id/rb_amap_custom"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="使用自定义高德 Key"
+            android:textSize="15sp" />
+    </RadioGroup>
+
+    <LinearLayout
+        android:id="@+id/layout_amap_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="12dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/et_amap_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@android:drawable/editbox_background"
+            android:hint="请输入 Android 平台 Key"
+            android:padding="12dp"
+            android:textSize="14sp"
+            android:minHeight="48dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="* 更改 Key 后需重启应用才能完全生效"
+            android:textColor="#FF5252"
+            android:textSize="11sp"
+            android:layout_marginTop="8dp"
+            android:layout_marginStart="4dp"/>
+
+        <TextView
+            android:id="@+id/tv_amap_debug_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="查看调试信息"
+            android:textColor="#2196F3"
+            android:textSize="13sp"
+            android:paddingVertical="8dp"
+            android:paddingHorizontal="4dp"
+            android:layout_marginTop="8dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"/>
+    </LinearLayout>
+</LinearLayout>
