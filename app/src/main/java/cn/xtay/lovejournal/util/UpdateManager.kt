@@ -24,16 +24,26 @@ class UpdateManager(private val context: Context) {
      * 核心方法：检查并显示更新弹窗
      */
     fun checkAndShowDialog(serverCode: Int, versionName: String, log: String, url: String) {
+        // 💖 核心新增：只要收到更新指令，哪怕被拦截了，也把这套“最新版本信息”永久存到专属缓存里！
+        val prefs = context.getSharedPreferences("update_prefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("cached_server_code", serverCode)
+            .putString("cached_version_name", versionName)
+            .putString("cached_log", log)
+            .putString("cached_url", url)
+            .apply()
+
+        // 获取本地真实安装的版本号
         val localCode = BuildConfig.VERSION_CODE
         val ignoredVersion = UserPrefs.getIgnoredVersion(context)
 
-        // 🔴 拦截 1：如果已经是最新版或更高，不弹
+        // 🔴 真正的对比：如果服务器发来的版本，小于等于你手机上真实安装的版本，绝对不弹
         if (serverCode <= localCode) return
 
-        // 🔴 拦截 2：如果版本号等于用户点过“忽略”的版本，不弹
+        // 🔴 拦截 2：被忽略的版本，不弹
         if (serverCode == ignoredVersion) return
 
-        // 🔴 拦截 3：如果用户在本次运行期间点过“稍后”，不弹
+        // 🔴 拦截 3：本次运行点过稍后，不弹
         if (isDelayedInSession) return
 
         // 🟢 满足所有条件，弹出 Material 对话框

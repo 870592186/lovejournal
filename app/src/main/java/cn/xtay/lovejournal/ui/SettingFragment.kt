@@ -106,33 +106,23 @@ class SettingFragment : Fragment() {
      * 💖 核心新增：手动触发版本检查逻辑
      */
     private fun manualCheckUpdate() {
-        // 1. 获取指令，增加 ?: "" 防止空指针异常
-        val fullCommand = UserPrefs.getRemoteCommand(requireContext()) ?: ""
+        // 1. 直接去读取我们刚才存的专属缓存
+        val prefs = requireContext().getSharedPreferences("update_prefs", Context.MODE_PRIVATE)
+        val serverCode = prefs.getInt("cached_server_code", 0)
+        val versionName = prefs.getString("cached_version_name", "") ?: ""
+        val log = prefs.getString("cached_log", "") ?: ""
+        val url = prefs.getString("cached_url", "") ?: ""
 
-        // 2. 尝试解析最后一次收到的 OTA 指令
-        if (fullCommand.startsWith("ota_update|")) {
-            val parts = fullCommand.split("|")
-            if (parts.size >= 5) {
-                try {
-                    val serverCode = parts[1].toInt()
-                    val versionName = parts[2]
-                    val updateLog = parts[3].replace("\\n", "\n")
-
-                    // 💖 优化点：考虑到极端情况下 URL 本身可能包含 "|" 字符
-                    // 我们把第 4 项之后的所有内容重新拼接回完整的 URL
-                    val downloadUrl = parts.subList(4, parts.size).joinToString("|")
-
-                    // 调用手动检查方法，它内部会自动判断 serverCode 是否大于当前版本
-                    updateManager.manualCheckShow(serverCode, versionName, updateLog, downloadUrl)
-                    return // 成功触发弹窗/检查后，直接退出函数
-                } catch (e: Exception) {
-                    e.printStackTrace() // 解析失败（比如版本号不是数字）则静默捕获，走到最下面的 Toast
-                }
-            }
+        // 2. 如果曾经收到过更新指令
+        if (serverCode > 0) {
+            // 调用手动检查方法。
+            // 放心！它内部有 `if (serverCode <= BuildConfig.VERSION_CODE)` 的严格判断！
+            // 如果你其实没安装，它必定会再次弹窗让你下！如果你安装了，它会弹 Toast 提示已是最新！
+            updateManager.manualCheckShow(serverCode, versionName, log, url)
+        } else {
+            // 连缓存都没有，说明服务器从来没发过更新
+            Toast.makeText(requireContext(), "当前已是最新版本", Toast.LENGTH_SHORT).show()
         }
-
-        // 3. 如果最后一条指令根本不是 OTA (比如是 lock_screen)，或者解析意外失败
-        Toast.makeText(requireContext(), "当前已是最新版本", Toast.LENGTH_SHORT).show()
     }
     private fun showNotifManageDialog() {
         val scroll = ScrollView(requireContext())
