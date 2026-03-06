@@ -28,26 +28,39 @@ jobs:
           sed -i 's/\r$//' gradlew
           chmod +x gradlew
 
-      # 💖 修正 2：确保命令独立运行
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+      # 💖 修正 2：改为 assembleRelease，打出正式版的未签名包
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
 
-      # 💖 修正 3：发布到 GitHub Release
+      # 💖 核心新增：调用专业签名工具，使用你的专属身份证盖章
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      # 💖 修正 3：上传签名后的正式版 APK
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/app-debug.apk
+          # 魔法变量：自动获取上一步签名成功的 APK 路径
+          files: ${{steps.sign_app.outputs.signedReleaseFile}}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 💖 修正 4：双服推送逻辑（同样移除了多余的横线）
+      # 💖 修正 4：推送给手机的 URL，记得把结尾的 app-debug.apk 改成 app-release-signed.apk！
       - name: Push OTA to Multiple Servers
         run: |
           VERSION_NAME=$(echo "${{ github.ref_name }}" | sed 's/v//g')
           IFS='.' read -r -a parts <<< "$VERSION_NAME"
           VERSION_CODE=$((parts[0]*10000 + parts[1]*100 + parts[2]))
-          # 💖 核心优化：在原本的 URL 前面加上公益加速镜像地址！
-          DOWNLOAD_URL="https://ghproxy.net/https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-debug.apk"
+          
+          # 结尾改成 app-release-signed.apk
+          DOWNLOAD_URL="https://ghproxy.net/https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-release-signed.apk"
           UPDATE_LOG="GitHub 自动构建发布：${{ github.event.head_commit.message }}"
 
           echo "🚀 开始双服务器推送..."
