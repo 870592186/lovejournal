@@ -99,7 +99,7 @@
             android:value="aa2deebf852718ded2abd49f2fbb8980" />
 
         <activity
-            android:name=".ui.HomeActivity"
+            android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -108,15 +108,11 @@
         </activity>
 
         <activity
-            android:name=".MainActivity"
-            android:exported="false">
-        </activity>
-
-        <activity
             android:name=".LoginActivity"
             android:exported="false"
             android:theme="@style/Theme.情侣手记"
             android:windowSoftInputMode="adjustResize" />
+
 
         <provider
             android:name="androidx.core.content.FileProvider"

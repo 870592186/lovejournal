@@ -96,7 +96,9 @@ class MainActivity : AppCompatActivity() {
         viewPager = findViewById(R.id.view_pager)
         bottomNav = findViewById(R.id.bottom_nav)
         viewPager.adapter = MainAdapter(this)
-        viewPager.offscreenPageLimit = 3
+
+        // 💖 核心修改：因为现在有 5 个页面了，把预加载上限调到 4，保证左右滑动时页面不会被销毁重载
+        viewPager.offscreenPageLimit = 4
 
         val rootLayout = findViewById<android.view.View>(R.id.main_root)
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { v, insets ->
@@ -399,15 +401,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupNavigation() {
+        // 💖 核心修改：重新绑定 5 个页面的映射关系
         bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.nav_map -> viewPager.setCurrentItem(0, false)
-                R.id.nav_period -> viewPager.setCurrentItem(1, false)
-                R.id.nav_device -> viewPager.setCurrentItem(2, false)
-                R.id.nav_setting -> viewPager.setCurrentItem(3, false)
+                R.id.nav_home -> viewPager.setCurrentItem(0, false)   // 首页：爱心
+                R.id.nav_map -> viewPager.setCurrentItem(1, false)    // 页面 1：定位
+                R.id.nav_period -> viewPager.setCurrentItem(2, false) // 页面 2：姨妈
+                R.id.nav_device -> viewPager.setCurrentItem(3, false) // 页面 3：设备
+                R.id.nav_setting -> viewPager.setCurrentItem(4, false)// 页面 4：设置
             }
             true
         }
+
         viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
