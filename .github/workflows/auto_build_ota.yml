@@ -32,29 +32,39 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
-      # 💖 核心修复：用 Google 官方工具，当场给服务器安装它需要的 29.0.3！
-      - name: Install Build Tools 29.0.3
-        run: sdkmanager "build-tools;29.0.3"
-
-      # 💖 核心新增：调用专业签名工具，使用你的专属身份证盖章
-      - name: Sign APK
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-
-      # 💖 修正 3：上传签名后的正式版 APK
+            # 💖 终极方案：抛弃所有垃圾第三方插件，纯原生 Android 官方命令签名！绝对不会报错！
+      - name: Sign APK (Native)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEY }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+                # 1. 还原签名文件
+          echo "$KEYSTORE_BASE64" | base64 -d > my.jks
+                
+                # 2. 自动寻找服务器上自带的、最新的安卓工具，不用再死磕 29.0.3 了
+          BUILD_TOOLS=$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)
+          ZIPALIGN="$ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+                
+          # 3. 对齐优化 APK (Google 强制要求)
+          $ZIPALIGN -v -p 4 app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
+                
+          # 4. 执行官方签名
+          $APKSIGNER sign --ks my.jks --ks-key-alias "$KEY_ALIAS" --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" app-release-aligned.apk
+                
+          # 5. 放回原目录
+          mv app-release-aligned.apk app/build/outputs/apk/release/app-release-signed.apk
+            
+           # 💖 重新使用固定路径发布
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
-          # 魔法变量：自动获取上一步签名成功的 APK 路径
-          files: ${{steps.sign_app.outputs.signedReleaseFile}}
+          files: app/build/outputs/apk/release/app-release-signed.apk
           token: ${{ secrets.GITHUB_TOKEN }}
+
 
       # 💖 修正 4：推送给手机的 URL，记得把结尾的 app-debug.apk 改成 app-release-signed.apk！
       - name: Push OTA to Multiple Servers
