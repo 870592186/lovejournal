@@ -526,7 +526,7 @@ class SettingFragment : Fragment() {
 
     private fun showDebugInfoDialog() {
         val packageName = "cn.xtay.lovejournal"
-        val sha1 = "98:D5:0F:99:D8:76:5B:55:95:AF:A7:04:3F:E1:DF:3E:72:5D:1D:E6"
+        val sha1 = "C8:62:7D:F8:FB:B1:21:1B:E5:A0:04:EA:5B:C0:BF:A9:1E:42:38:DC"
 
         val container = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.VERTICAL
