@@ -17,6 +17,7 @@ object RemoteCommandExecutor {
             "go_home" -> goHome(context)
             "open_wechat" -> openApp(context, "com.tencent.mm")
             "take_screenshot" -> takeScreenshot()
+            "fly_heart" -> HeartEffectUtil.showFloatingHeart(context) // 💖 核心新增：收到指令，直接起飞！
             else -> { /* 未知指令忽略 */ }
         }
     }

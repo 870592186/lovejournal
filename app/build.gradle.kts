@@ -98,6 +98,8 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.1")
+// 💖 引入 Glide 图片加载库（专门用来丝滑播放 GIF）
+    implementation("com.github.bumptech.glide:glide:4.16.0")
 
 
 }
