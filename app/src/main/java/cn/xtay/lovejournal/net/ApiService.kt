@@ -79,4 +79,17 @@ interface ApiService {
         @Field("user_id") userId: Int,
         @Field("partner_id") partnerId: Int
     ): Call<UserResponse>
+
+    // 💖 新增接口：向对方发送远控指令 (比如 fly_heart)
+    @FormUrlEncoded
+    @POST("love_api/api.php")
+    fun sendCommand(
+        @Field("action") action: String = "send_command",
+        @Field("user_id") userId: Int,       // 自己的 ID
+        @Field("partner_id") partnerId: Int, // 对方的 ID
+        @Field("command") command: String,   // 指令内容 (fly_heart)
+        @Field("time") time: Long            // 时间戳
+    ): Call<UserResponse>
+
+
 }
