@@ -32,7 +32,7 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
-            # 💖 终极方案：抛弃所有垃圾第三方插件，纯原生 Android 官方命令签名！绝对不会报错！
+      # 💖 终极方案：抛弃所有垃圾第三方插件，纯原生 Android 官方命令签名！绝对不会报错！
       - name: Sign APK (Native)
         env:
           KEYSTORE_BASE64: ${{ secrets.SIGNING_KEY }}
@@ -40,31 +40,30 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-                # 1. 还原签名文件
+          # 1. 还原签名文件
           echo "$KEYSTORE_BASE64" | base64 -d > my.jks
-                
-                # 2. 自动寻找服务器上自带的、最新的安卓工具，不用再死磕 29.0.3 了
+          
+          # 2. 自动寻找服务器上自带的、最新的安卓工具，不用再死磕 29.0.3 了
           BUILD_TOOLS=$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)
           ZIPALIGN="$ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign"
           APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
-                
+          
           # 3. 对齐优化 APK (Google 强制要求)
           $ZIPALIGN -v -p 4 app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
-                
+          
           # 4. 执行官方签名
           $APKSIGNER sign --ks my.jks --ks-key-alias "$KEY_ALIAS" --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" app-release-aligned.apk
-                
+          
           # 5. 放回原目录
           mv app-release-aligned.apk app/build/outputs/apk/release/app-release-signed.apk
-            
-           # 💖 重新使用固定路径发布
+
+      # 💖 重新使用固定路径发布
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/app-release-signed.apk
           token: ${{ secrets.GITHUB_TOKEN }}
-
 
       # 💖 修正 4：推送给手机的 URL，记得把结尾的 app-debug.apk 改成 app-release-signed.apk！
       - name: Push OTA to Multiple Servers
