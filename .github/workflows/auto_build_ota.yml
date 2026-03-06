@@ -46,7 +46,8 @@ jobs:
           VERSION_NAME=$(echo "${{ github.ref_name }}" | sed 's/v//g')
           IFS='.' read -r -a parts <<< "$VERSION_NAME"
           VERSION_CODE=$((parts[0]*10000 + parts[1]*100 + parts[2]))
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-debug.apk"
+          # 💖 核心优化：在原本的 URL 前面加上公益加速镜像地址！
+          DOWNLOAD_URL="https://mirror.ghproxy.com/https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-debug.apk"
           UPDATE_LOG="GitHub 自动构建发布：${{ github.event.head_commit.message }}"
 
           echo "🚀 开始双服务器推送..."
