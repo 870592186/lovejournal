@@ -34,7 +34,7 @@ jobs:
 
       # 💖 核心新增：调用专业签名工具，使用你的专属身份证盖章
       - name: Sign APK
-        uses: r0adkll/sign-android-release@v1
+        uses: ilhasoft/sign-android-release@v1
         id: sign_app
         with:
           releaseDirectory: app/build/outputs/apk/release
