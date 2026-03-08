@@ -66,8 +66,7 @@ class LocationService : Service() {
         var isRunning = false
             private set
         private const val WORK_NAME = "ScreenOffSyncWork"
-        // 💖 新增：OTA 更新通知广播 Action
-        const val ACTION_UPDATE_AVAILABLE = "cn.xtay.lovejournal.ACTION_UPDATE_AVAILABLE"
+        // 🗑️ 已移除容易漏接的 ACTION_UPDATE_AVAILABLE 广播常量
     }
 
     private var mLocationClient: AMapLocationClient? = null
@@ -76,8 +75,6 @@ class LocationService : Service() {
 
     private var tempWakeLock: PowerManager.WakeLock? = null
     private var isEmergencyLocation = false
-
-    // 🌟 核心新增：记录是否处于 GPS 兜底重试状态
     private var isFallbackToGps = false
 
     private var lastLat: Double? = null
@@ -111,23 +108,12 @@ class LocationService : Service() {
     private fun checkAndExecuteHeartbeat() {
         if (!isScreenOn) return
 
-        if (DeviceUtil.getNetworkInfo(this).first == "无网络") {
-            return
-        }
+        if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
 
+        // 💖 改造点：专注于纯粹的远控指令执行（如飞屏爱心、锁屏等），不再拦截 OTA 更新
         StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
             pendingClearCommandTime = commandTime
-
-            // 💖 核心新增：解析 OTA 更新指令
-            val cmd = UserPrefs.getRemoteCommand(this@LocationService)
-            if (cmd.startsWith("ota_update|")) {
-                // 1. 发送广播通知 MainActivity (如果它在前台就弹窗)
-                sendBroadcast(Intent(ACTION_UPDATE_AVAILABLE))
-                // 2. 上报更新状态
-                uploadData(lastLat, lastLng, lastAddr, "📥 收到系统更新推送")
-            } else {
-                uploadData(lastLat, lastLng, lastAddr, "✅ 已执行远控指令")
-            }
+            uploadData(lastLat, lastLng, lastAddr, "✅ 已执行远控指令")
         }
 
         val batteryLevel = DeviceUtil.getBatteryLevel(this)
@@ -185,7 +171,6 @@ class LocationService : Service() {
                 if (now - lastLocationTime >= 300000L) {
                     acquireTempWakeLock(60000L)
 
-                    // 💖 修改：使用自定义移动中文案
                     val customVal = UserPrefs.getNotifMoving(this)
                     val displayMsg = if (customVal.isNotEmpty()) customVal else "🚶 移动基站切换中..."
 
@@ -207,9 +192,7 @@ class LocationService : Service() {
                     screenOffTime = System.currentTimeMillis()
                     heartbeatHandler.removeCallbacksAndMessages(null)
 
-                    if (DeviceUtil.getNetworkInfo(this@LocationService).first == "无网络") {
-                        return
-                    }
+                    if (DeviceUtil.getNetworkInfo(this@LocationService).first == "无网络") return
 
                     acquireTempWakeLock(60000L)
                     uploadData(lastLat, lastLng, lastAddr, null)
@@ -254,7 +237,6 @@ class LocationService : Service() {
             lastWifiName = newWifi
 
             if (netType == "无网络") {
-                // 💖 修改：使用自定义断网文案
                 val customOff = UserPrefs.getNotifOffline(this@LocationService)
                 val displayMsg = if (customOff.isNotEmpty()) customOff else "无网络连接，已暂停后台同步"
 
@@ -279,7 +261,6 @@ class LocationService : Service() {
 
             triggerSingleLocation(true)
 
-            // 💖 修改：使用自定义正常运行文案
             val customNormal = UserPrefs.getNotifNormal(this@LocationService)
             val baseMsg = if (customNormal.isNotEmpty()) customNormal else "守护中：网络正常"
             updateNotification("$baseMsg (${netType})")
@@ -292,22 +273,17 @@ class LocationService : Service() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                // 💖 唤醒锁加长至 20 秒，覆盖延迟
                 acquireTempWakeLock(20000L)
                 heartbeatHandler.removeCallbacks(networkCheckRunnable)
-                // 💖 延迟 1.5 秒执行网络状态抓取
                 heartbeatHandler.postDelayed(networkCheckRunnable, 1500L)
             }
             override fun onLost(network: Network) {
-                // 💖 唤醒锁加长至 20 秒，覆盖延迟
                 acquireTempWakeLock(20000L)
                 heartbeatHandler.removeCallbacks(networkCheckRunnable)
-                // 💖 延迟 1.5 秒执行断网状态抓取
                 heartbeatHandler.postDelayed(networkCheckRunnable, 1500L)
             }
         }
         connectivityManager?.registerNetworkCallback(NetworkRequest.Builder().build(), networkCallback!!)
-        // 初始启动时不用延迟
         heartbeatHandler.post(networkCheckRunnable)
     }
 
@@ -354,7 +330,6 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 💖 处理从设置页面发来的刷新横幅指令
         if (intent?.action == "ACTION_UPDATE_NOTIF") {
             val netInfo = DeviceUtil.getNetworkInfo(this).first
             if (netInfo == "无网络") {
@@ -374,13 +349,9 @@ class LocationService : Service() {
 
             acquireTempWakeLock(60000L)
 
-            // 💖 核心新增：Worker 同步时也检查一遍 OTA 指令
+            // 💖 改造点：Worker 唤醒时同样只处理纯粹远控指令
             StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
                 pendingClearCommandTime = commandTime
-                val cmd = UserPrefs.getRemoteCommand(this@LocationService)
-                if (cmd.startsWith("ota_update|")) {
-                    sendBroadcast(Intent(ACTION_UPDATE_AVAILABLE))
-                }
             }
 
             if (lastNetType == "WiFi") {
@@ -398,7 +369,6 @@ class LocationService : Service() {
             mLocationClient?.setLocationListener { location ->
                 if (location != null) {
                     if (location.errorCode == 0) {
-                        // 🌟 成功获取位置，重置标志位
                         isFallbackToGps = false
 
                         val dbLog = LocationEntity(
@@ -423,15 +393,12 @@ class LocationService : Service() {
                         uploadData(lastLat, lastLng, lastAddr, null)
 
                     } else {
-                        // 🌟 核心逻辑：如果在省电模式下（基站/WiFi）没找到位置
                         if (!isFallbackToGps) {
-                            // 标记进入降级补偿状态，并立即重试
                             isFallbackToGps = true
                             heartbeatHandler.post(locationRunnable)
                             return@setLocationListener
                         }
 
-                        // 🌟 如果连 GPS 兜底都失败了，彻底放弃，记录异常
                         isFallbackToGps = false
 
                         val errorLog = LocationEntity(
@@ -450,7 +417,6 @@ class LocationService : Service() {
 
                         lastLocationTime = 0L
 
-                        // 💖 修改：使用自定义异常文案
                         val customErr = UserPrefs.getNotifError(this@LocationService)
                         val displayMsg = if (customErr.isNotEmpty()) customErr else "⚠️ 信号盲区/波动"
 
@@ -467,15 +433,12 @@ class LocationService : Service() {
                 isNeedAddress = true
                 isOnceLocation = true
 
-                // 🌟 所有状态默认使用低精度，只有触发兜底才激活 GPS
                 if (isFallbackToGps) {
-                    // 荒郊野外模式：临时启用高精度 (GPS + 辅助网络)
                     locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
                     isGpsFirst = true
                     isOnceLocationLatest = true
                     httpTimeOut = 15000
                 } else {
-                    // 全天候省电模式：完全不开启 GPS，仅依赖附近基站和 WiFi 嗅探
                     locationMode = AMapLocationClientOption.AMapLocationMode.Battery_Saving
                     isGpsFirst = false
                     isOnceLocationLatest = false
@@ -580,7 +543,6 @@ class LocationService : Service() {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        // 💖 修改：使用自定义总标题
         val customTitle = UserPrefs.getNotifTitle(this)
         val displayTitle = if (customTitle.isNotEmpty()) customTitle else "情侣手记实时守护中"
 

@@ -44,17 +44,8 @@ class MainActivity : AppCompatActivity() {
     // 弹窗防重叠锁
     private var currentDialog: AlertDialog? = null
 
-    // 💖 新增：更新管理器
+    // 更新管理器
     private val updateManager by lazy { UpdateManager(this) }
-
-    // 💖 新增：OTA 指令监听广播
-    private val otaReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == LocationService.ACTION_UPDATE_AVAILABLE) {
-                checkOtaCommand()
-            }
-        }
-    }
 
     // 前台基础权限阵列（不含后台定位）
     private val RUNTIME_PERMISSIONS = mutableListOf(
@@ -97,7 +88,6 @@ class MainActivity : AppCompatActivity() {
         bottomNav = findViewById(R.id.bottom_nav)
         viewPager.adapter = MainAdapter(this)
 
-        // 💖 核心修改：因为现在有 5 个页面了，把预加载上限调到 4，保证左右滑动时页面不会被销毁重载
         viewPager.offscreenPageLimit = 4
 
         val rootLayout = findViewById<android.view.View>(R.id.main_root)
@@ -109,35 +99,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupNavigation()
-
-        // 💖 注册 OTA 监听广播
-        // 💖 这样写既能解决 Android 14 闪退，又能消除红线，兼容所有版本
-        ContextCompat.registerReceiver(
-            this,
-            otaReceiver,
-            IntentFilter(LocationService.ACTION_UPDATE_AVAILABLE),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
+        // 🗑️ 已彻底删除了容易引发崩溃的 OTA 广播注册
     }
 
     override fun onResume() {
         super.onResume()
 
-        // 💖 重置“稍后提醒”标志位，确保每次打开 APP 进入前台都能再次弹出
+        // 重置“稍后提醒”标志位
         UpdateManager.isDelayedInSession = false
-
-        // 每次进入前台时，先关掉可能残留的对话框，防止叠罗汉
         currentDialog?.dismiss()
 
-        // 💖 检查是否有待处理的更新指令
-        checkOtaCommand()
+        // 💖 核心重构：APP 每次回到前台，主动出击拉取静态 json！绝不漏接更新！
+        checkGlobalUpdate()
 
         val partnerId = UserPrefs.getPartnerId(this)
         if (partnerId <= 0) {
-            // 单身状态下，只弹绑定警告，不去烦用户要底层权限
             checkBindingStatus()
         } else {
-            // ✅ 只要绑定了就直接去触发权限检查
             checkAndRequestNextPermission()
         }
 
@@ -145,32 +123,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 💖 核心新增：解析远控指令中的 OTA 更新信息
+     * 💖 新增的专属主动检查更新方法
      */
-    private fun checkOtaCommand() {
-        val fullCommand = UserPrefs.getRemoteCommand(this)
-        // 格式：ota_update|code|name|log|url
-        if (fullCommand.startsWith("ota_update|")) {
-            val parts = fullCommand.split("|")
-            if (parts.size >= 5) {
-                try {
-                    val serverCode = parts[1].toInt()
-                    val versionName = parts[2]
-                    val updateLog = parts[3].replace("\\n", "\n") // 支持换行符转义
-                    val downloadUrl = parts[4]
+    private fun checkGlobalUpdate() {
+        NetworkClient.getApi(this).checkAppUpdate().enqueue(object : Callback<okhttp3.ResponseBody> {
+            override fun onResponse(call: Call<okhttp3.ResponseBody>, response: Response<okhttp3.ResponseBody>) {
+                if (response.isSuccessful) {
+                    try {
+                        // 解析服务器的 update.json 文件
+                        val jsonString = response.body()?.string() ?: return
+                        val jsonObject = org.json.JSONObject(jsonString)
 
-                    // 调用 UpdateManager 执行版本比对和弹窗
-                    updateManager.checkAndShowDialog(
-                        serverCode = serverCode,
-                        versionName = versionName,
-                        log = updateLog,
-                        url = downloadUrl
-                    )
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                        val serverCode = jsonObject.optInt("v_code", 0)
+                        val versionName = jsonObject.optString("v_name", "")
+                        val updateLog = jsonObject.optString("log", "")
+                        val downloadUrl = jsonObject.optString("url", "")
+
+                        if (serverCode > 0 && downloadUrl.isNotEmpty()) {
+                            // 丢给 UpdateManager 去做版本号比对和弹窗
+                            updateManager.checkAndShowDialog(serverCode, versionName, updateLog, downloadUrl)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
-        }
+
+            override fun onFailure(call: Call<okhttp3.ResponseBody>, t: Throwable) {
+                // 静默失败，网络不好时不打扰用户
+            }
+        })
     }
 
     /**
@@ -180,7 +162,7 @@ class MainActivity : AppCompatActivity() {
         currentDialog = AlertDialog.Builder(this)
             .setTitle("账号安全警告")
             .setMessage("你还未绑定情侣，账号将在注册成功24小时内自动失效，请及时绑定情侣")
-            .setCancelable(false) // 强制必须看
+            .setCancelable(false)
             .setPositiveButton("立即绑定") { _, _ ->
                 showManualBindDialog()
             }
@@ -188,9 +170,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * 💖 修复 1：升级为双输入框（昵称 + 邀请码）
-     */
     private fun showManualBindDialog() {
         currentDialog?.dismiss()
 
@@ -212,7 +191,6 @@ class MainActivity : AppCompatActivity() {
             isAllCaps = true
         }
 
-        // 添加一个小提示字
         val tvHint = TextView(this).apply {
             text = "设置后不可修改，绑定后将开启实时守护"
             textSize = 12f
@@ -227,7 +205,7 @@ class MainActivity : AppCompatActivity() {
         currentDialog = AlertDialog.Builder(this)
             .setTitle("绑定情侣")
             .setView(layout)
-            .setPositiveButton("确认绑定", null) // 设为null防止直接关闭
+            .setPositiveButton("确认绑定", null)
             .setNegativeButton("取消", null)
             .show()
 
@@ -249,9 +227,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 💖 修复 2：执行绑定请求（补齐 nickname 参数）
-     */
     private fun performBindAction(nickname: String, code: String) {
         val uid = UserPrefs.getUserId(this)
         NetworkClient.getApi(this).bind(userId = uid, nickname = nickname, targetCode = code)
@@ -259,14 +234,11 @@ class MainActivity : AppCompatActivity() {
                 override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                     val res = response.body() ?: return
                     if (res.status == "success") {
-                        // 💖 保存自己和对方的昵称
                         UserPrefs.saveNickname(this@MainActivity, nickname)
                         UserPrefs.savePartnerNickname(this@MainActivity, res.partner_nickname ?: "TA")
                         UserPrefs.savePartnerId(this@MainActivity, res.partner_id ?: -1)
 
                         Toast.makeText(this@MainActivity, "绑定成功！祝白头偕老 ❤️", Toast.LENGTH_SHORT).show()
-
-                        // 绑定成功后，立即触发权限申请流程
                         checkAndRequestNextPermission()
                     } else {
                         Toast.makeText(this@MainActivity, res.message ?: "绑定失败", Toast.LENGTH_SHORT).show()
@@ -396,19 +368,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        unregisterReceiver(otaReceiver) // 💖 记得销毁监听
         currentDialog?.dismiss()
+        // 🗑️ 无需注销广播了
     }
 
     private fun setupNavigation() {
-        // 💖 核心修改：重新绑定 5 个页面的映射关系
         bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.nav_home -> viewPager.setCurrentItem(0, false)   // 首页：爱心
-                R.id.nav_map -> viewPager.setCurrentItem(1, false)    // 页面 1：定位
-                R.id.nav_period -> viewPager.setCurrentItem(2, false) // 页面 2：姨妈
-                R.id.nav_device -> viewPager.setCurrentItem(3, false) // 页面 3：设备
-                R.id.nav_setting -> viewPager.setCurrentItem(4, false)// 页面 4：设置
+                R.id.nav_home -> viewPager.setCurrentItem(0, false)
+                R.id.nav_map -> viewPager.setCurrentItem(1, false)
+                R.id.nav_period -> viewPager.setCurrentItem(2, false)
+                R.id.nav_device -> viewPager.setCurrentItem(3, false)
+                R.id.nav_setting -> viewPager.setCurrentItem(4, false)
             }
             true
         }

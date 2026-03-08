@@ -5,6 +5,8 @@ import retrofit2.Call
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.POST
+import okhttp3.ResponseBody
+import retrofit2.http.GET
 
 interface ApiService {
     @FormUrlEncoded
@@ -91,5 +93,9 @@ interface ApiService {
         @Field("time") time: Long            // 时间戳
     ): Call<UserResponse>
 
+
+    // 💖 全新加入：直接拉取服务器上的 update.json 文件
+    @GET("love_api/update.json")
+    fun checkAppUpdate(): Call<ResponseBody>
 
 }
