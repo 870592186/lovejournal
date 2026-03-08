@@ -18,14 +18,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import cn.xtay.lovejournal.LoginActivity
-import cn.xtay.lovejournal.MainActivity
 import cn.xtay.lovejournal.R
 import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.model.local.AppDatabase
 import cn.xtay.lovejournal.net.NetworkClient
 import cn.xtay.lovejournal.service.LocationService
 import cn.xtay.lovejournal.util.UserPrefs
-import cn.xtay.lovejournal.util.UpdateManager // 💖 新增引用
+import cn.xtay.lovejournal.util.UpdateManager
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -46,7 +45,6 @@ class SettingFragment : Fragment() {
     private lateinit var btnLogout: Button
     private lateinit var switchHideRecents: MaterialSwitch
 
-    // 💖 新增：更新管理器
     private val updateManager by lazy { UpdateManager(requireContext()) }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -60,11 +58,7 @@ class SettingFragment : Fragment() {
         val tvAMapManage = view.findViewById<TextView>(R.id.tv_amap_manage)
 
         val tvLocationLogs = view.findViewById<TextView>(R.id.tv_location_logs)
-
-        // 💖 绑定通知管理按钮
         val tvNotifManage = view.findViewById<TextView>(R.id.tv_notif_manage)
-
-        // 💖 核心新增：绑定检查更新按钮
         val tvCheckUpdate = view.findViewById<TextView>(R.id.tv_check_update)
 
         btnLogout = view.findViewById(R.id.btn_logout)
@@ -88,10 +82,7 @@ class SettingFragment : Fragment() {
 
         tvServerManage.setOnClickListener { showServerSettingDialog() }
         tvAMapManage.setOnClickListener { showAMapSettingDialog() }
-
         tvLocationLogs?.setOnClickListener { showLocationLogsDialog() }
-
-        // 💖 监听通知管理点击
         tvNotifManage?.setOnClickListener { showNotifManageDialog() }
 
         // 💖 监听手动检查更新点击
@@ -103,27 +94,46 @@ class SettingFragment : Fragment() {
     }
 
     /**
-     * 💖 核心新增：手动触发版本检查逻辑
+     * 💖 核心修改：手动触发时，直接拉取服务器的 JSON 文件，最实时！
      */
     private fun manualCheckUpdate() {
-        // 1. 直接去读取我们刚才存的专属缓存
-        val prefs = requireContext().getSharedPreferences("update_prefs", Context.MODE_PRIVATE)
-        val serverCode = prefs.getInt("cached_server_code", 0)
-        val versionName = prefs.getString("cached_version_name", "") ?: ""
-        val log = prefs.getString("cached_log", "") ?: ""
-        val url = prefs.getString("cached_url", "") ?: ""
+        Toast.makeText(requireContext(), "正在检查更新...", Toast.LENGTH_SHORT).show()
 
-        // 2. 如果曾经收到过更新指令
-        if (serverCode > 0) {
-            // 调用手动检查方法。
-            // 放心！它内部有 `if (serverCode <= BuildConfig.VERSION_CODE)` 的严格判断！
-            // 如果你其实没安装，它必定会再次弹窗让你下！如果你安装了，它会弹 Toast 提示已是最新！
-            updateManager.manualCheckShow(serverCode, versionName, log, url)
-        } else {
-            // 连缓存都没有，说明服务器从来没发过更新
-            Toast.makeText(requireContext(), "当前已是最新版本", Toast.LENGTH_SHORT).show()
-        }
+        NetworkClient.getApi(requireContext()).checkAppUpdate().enqueue(object : Callback<okhttp3.ResponseBody> {
+            override fun onResponse(call: Call<okhttp3.ResponseBody>, response: Response<okhttp3.ResponseBody>) {
+                if (response.isSuccessful && isAdded) {
+                    try {
+                        val jsonString = response.body()?.string() ?: return
+                        val jsonObject = org.json.JSONObject(jsonString)
+
+                        val serverCode = jsonObject.optInt("v_code", 0)
+                        val versionName = jsonObject.optString("v_name", "")
+                        val updateLog = jsonObject.optString("log", "")
+                        val downloadUrl = jsonObject.optString("url", "")
+
+                        if (serverCode > 0 && downloadUrl.isNotEmpty()) {
+                            // 丢给 UpdateManager 去做对比，如果版本不够大，它内部会弹 Toast 说"当前已是最新"
+                            updateManager.manualCheckShow(serverCode, versionName, updateLog, downloadUrl)
+                        } else {
+                            Toast.makeText(requireContext(), "未检测到新版本", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(requireContext(), "解析更新数据失败", Toast.LENGTH_SHORT).show()
+                    }
+                } else if (isAdded) {
+                    Toast.makeText(requireContext(), "服务器未响应", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onFailure(call: Call<okhttp3.ResponseBody>, t: Throwable) {
+                if (isAdded) {
+                    Toast.makeText(requireContext(), "网络连接失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
     }
+
     private fun showNotifManageDialog() {
         val scroll = ScrollView(requireContext())
         val layout = LinearLayout(requireContext()).apply {
