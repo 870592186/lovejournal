@@ -34,26 +34,43 @@ object UserPrefs {
     private const val KEY_REMOTE_COMMAND = "remote_command"
     private const val KEY_COMMAND_TIME = "command_time"
 
-    // 💖 核心新增：昵称信息的缓存 Key
     private const val KEY_MY_NICKNAME = "my_nickname"
     private const val KEY_PARTNER_NICKNAME = "partner_nickname"
 
-    // 💖 核心新增：全状态通知横幅 Key
     private const val KEY_NOTIF_TITLE = "notif_title"
     private const val KEY_NOTIF_NORMAL = "notif_normal"
     private const val KEY_NOTIF_OFFLINE = "notif_offline"
     private const val KEY_NOTIF_MOVING = "notif_moving"
     private const val KEY_NOTIF_ERROR = "notif_error"
 
-    // 💖 核心新增：OTA 更新忽略版本 Key
     private const val KEY_OTA_IGNORED_VERSION = "ota_ignored_version"
+
+    // 💖 核心新增：专门供小组件使用的数据缓存 Key
+    private const val KEY_WIDGET_PARTNER_BATTERY = "widget_partner_battery"
+    private const val KEY_WIDGET_PARTNER_APP = "widget_partner_app"
+    private const val KEY_WIDGET_PARTNER_ADDRESS = "widget_partner_address"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     // ==========================================
-    // 💖 核心新增：昵称信息的存取方法
+    // 💖 核心新增：小组件专属数据存取方法
+    // ==========================================
+
+    fun saveWidgetData(context: Context, battery: Int, app: String, address: String) {
+        getPrefs(context).edit().apply {
+            putInt(KEY_WIDGET_PARTNER_BATTERY, battery)
+            putString(KEY_WIDGET_PARTNER_APP, app)
+            putString(KEY_WIDGET_PARTNER_ADDRESS, address)
+            apply()
+        }
+    }
+
+    fun getWidgetPartnerBattery(context: Context): Int = getPrefs(context).getInt(KEY_WIDGET_PARTNER_BATTERY, 0)
+    fun getWidgetPartnerApp(context: Context): String = getPrefs(context).getString(KEY_WIDGET_PARTNER_APP, "") ?: ""
+    fun getWidgetPartnerAddress(context: Context): String = getPrefs(context).getString(KEY_WIDGET_PARTNER_ADDRESS, "") ?: ""
+
     // ==========================================
 
     fun saveNickname(context: Context, name: String) {
@@ -65,8 +82,6 @@ object UserPrefs {
         getPrefs(context).edit().putString(KEY_PARTNER_NICKNAME, name).apply()
     }
     fun getPartnerNickname(context: Context): String? = getPrefs(context).getString(KEY_PARTNER_NICKNAME, null)
-
-    // ==========================================
 
     fun saveServerConfigData(context: Context, config: cn.xtay.lovejournal.model.ServerConfig) {
         getPrefs(context).edit().apply {
@@ -218,7 +233,6 @@ object UserPrefs {
 
     fun getPartnerDeviceJson(context: Context): String? = getPrefs(context).getString(KEY_PARTNER_DATA_JSON, null)
 
-    // 💖 核心新增：通知横幅全状态管理
     fun saveNotifTitle(context: Context, v: String) = getPrefs(context).edit().putString(KEY_NOTIF_TITLE, v).apply()
     fun getNotifTitle(context: Context): String = getPrefs(context).getString(KEY_NOTIF_TITLE, "") ?: ""
 
@@ -234,7 +248,6 @@ object UserPrefs {
     fun saveNotifError(context: Context, v: String) = getPrefs(context).edit().putString(KEY_NOTIF_ERROR, v).apply()
     fun getNotifError(context: Context): String = getPrefs(context).getString(KEY_NOTIF_ERROR, "") ?: ""
 
-    // 💖 核心新增：OTA 忽略版本存取
     fun saveIgnoredVersion(context: Context, version: Int) {
         getPrefs(context).edit().putInt(KEY_OTA_IGNORED_VERSION, version).apply()
     }

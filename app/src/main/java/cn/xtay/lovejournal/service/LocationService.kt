@@ -29,6 +29,8 @@ import cn.xtay.lovejournal.net.NetworkClient
 import cn.xtay.lovejournal.util.DeviceUtil
 import cn.xtay.lovejournal.util.StrategyManager
 import cn.xtay.lovejournal.util.UserPrefs
+// 💖 新增：导入我们刚写好的 Widget Provider
+import cn.xtay.lovejournal.widget.CoupleWidgetProvider
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.location.AMapLocationClientOption
 import kotlinx.coroutines.CoroutineScope
@@ -66,7 +68,6 @@ class LocationService : Service() {
         var isRunning = false
             private set
         private const val WORK_NAME = "ScreenOffSyncWork"
-        // 🗑️ 已移除容易漏接的 ACTION_UPDATE_AVAILABLE 广播常量
     }
 
     private var mLocationClient: AMapLocationClient? = null
@@ -110,7 +111,6 @@ class LocationService : Service() {
 
         if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
 
-        // 💖 改造点：专注于纯粹的远控指令执行（如飞屏爱心、锁屏等），不再拦截 OTA 更新
         StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
             pendingClearCommandTime = commandTime
             uploadData(lastLat, lastLng, lastAddr, "✅ 已执行远控指令")
@@ -349,7 +349,6 @@ class LocationService : Service() {
 
             acquireTempWakeLock(60000L)
 
-            // 💖 改造点：Worker 唤醒时同样只处理纯粹远控指令
             StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
                 pendingClearCommandTime = commandTime
             }
@@ -491,9 +490,26 @@ class LocationService : Service() {
                     if (body.status == "error_kicked") {
                         handleKickedOffline(body.message ?: "账号已在别处登录")
                     } else if (body.status == "success") {
+                        // 1. 保存配置
                         body.server_config?.let { config ->
                             UserPrefs.saveServerConfigData(this@LocationService, config)
                         }
+
+                        // 💖 2. 核心新增：提取伴侣的实时数据供小组件使用！
+                        body.partner_data?.let { pd ->
+                            // 解析对方的电量和App状态
+                            val partnerBat = pd.device?.battery ?: 0
+                            val partnerApp = pd.device?.foreground_app ?: ""
+                            // 解析对方的地址
+                            val partnerAddr = pd.location?.address ?: ""
+
+                            // 存入专属缓存
+                            UserPrefs.saveWidgetData(this@LocationService, partnerBat, partnerApp, partnerAddr)
+
+                            // 🚀 触发小组件全局刷新！
+                            CoupleWidgetProvider.updateAllWidgets(this@LocationService)
+                        }
+
                         pendingClearCommandTime = 0L
                     }
                 }

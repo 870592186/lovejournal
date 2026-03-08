@@ -25,7 +25,7 @@ object HeartEffectUtil {
 
             // 1. 创建 ImageView 来承载动画
             val heartView = ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                scaleType = ImageView.ScaleType.FIT_CENTER
             }
 
             // 💖 2. 使用 Glide 丝滑加载透明 GIF 动图
@@ -66,7 +66,7 @@ object HeartEffectUtil {
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-            }, 4000)
+            }, 6000)
 
         } catch (e: Exception) {
             e.printStackTrace() // 防止没给悬浮窗权限时崩溃

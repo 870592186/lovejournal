@@ -1,10 +1,13 @@
 package cn.xtay.lovejournal.ui
 
+import android.app.Activity
 import android.app.ActivityManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -12,6 +15,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -25,7 +29,8 @@ import cn.xtay.lovejournal.net.NetworkClient
 import cn.xtay.lovejournal.service.LocationService
 import cn.xtay.lovejournal.util.UserPrefs
 import cn.xtay.lovejournal.util.UpdateManager
-import com.google.android.material.button.MaterialButton
+// 💖 引入小组件通知类
+import cn.xtay.lovejournal.widget.CoupleWidgetProvider
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
@@ -35,6 +40,8 @@ import kotlinx.coroutines.withContext
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 class SettingFragment : Fragment() {
@@ -45,7 +52,43 @@ class SettingFragment : Fragment() {
     private lateinit var btnLogout: Button
     private lateinit var switchHideRecents: MaterialSwitch
 
+    // 💖 新增：头像 ImageView
+    private lateinit var ivWidgetAvatarSetup: ImageView
+
     private val updateManager by lazy { UpdateManager(requireContext()) }
+
+    // 💖 核心新增：现代化的图片选择器 (无需图库权限)
+    private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data?.data != null) {
+            val uri = result.data!!.data!!
+            try {
+                // 1. 读取用户选的图片
+                val inputStream = requireContext().contentResolver.openInputStream(uri)
+                val originalBitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+
+                if (originalBitmap != null) {
+                    // 2. 压缩图片并保存为小组件专用的 widget_avatar.jpg
+                    val scaledBitmap = Bitmap.createScaledBitmap(originalBitmap, 300, 300, true)
+                    val avatarFile = File(requireContext().filesDir, "widget_avatar.jpg")
+                    val out = FileOutputStream(avatarFile)
+                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                    out.flush()
+                    out.close()
+
+                    // 3. 更新设置页面的圆形预览图
+                    ivWidgetAvatarSetup.setImageBitmap(scaledBitmap)
+
+                    // 4. 通知桌面小组件立刻刷新读取新头像！
+                    CoupleWidgetProvider.updateAllWidgets(requireContext())
+                    Toast.makeText(requireContext(), "小组件头像已更新", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(requireContext(), "图片处理失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val view = inflater.inflate(R.layout.fragment_setting, container, false)
@@ -63,15 +106,32 @@ class SettingFragment : Fragment() {
 
         btnLogout = view.findViewById(R.id.btn_logout)
 
+        // 💖 绑定新增的头像
+        ivWidgetAvatarSetup = view.findViewById(R.id.iv_widget_avatar_setup)
+
+        // 💖 启动时如果有旧头像，就展示出来
+        val avatarFile = File(requireContext().filesDir, "widget_avatar.jpg")
+        if (avatarFile.exists()) {
+            val bmp = BitmapFactory.decodeFile(avatarFile.absolutePath)
+            ivWidgetAvatarSetup.setImageBitmap(bmp)
+        }
+
         refreshUI()
         checkLatestStatus()
 
+        // 修改点击事件：如果是点击整个卡片，依然是触发绑定逻辑
         cardAccountInfo.setOnClickListener {
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 showBindDialog()
             } else {
                 showAlreadyBoundInfo()
             }
+        }
+
+        // 💖 核心新增：如果单独点击头像框，触发选图逻辑
+        ivWidgetAvatarSetup.setOnClickListener {
+            val intent = Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+            pickImageLauncher.launch(intent)
         }
 
         switchHideRecents.isChecked = UserPrefs.isHideRecentsEnabled(requireContext())
@@ -84,8 +144,6 @@ class SettingFragment : Fragment() {
         tvAMapManage.setOnClickListener { showAMapSettingDialog() }
         tvLocationLogs?.setOnClickListener { showLocationLogsDialog() }
         tvNotifManage?.setOnClickListener { showNotifManageDialog() }
-
-        // 💖 监听手动检查更新点击
         tvCheckUpdate?.setOnClickListener { manualCheckUpdate() }
 
         btnLogout.setOnClickListener { showLogoutConfirmDialog() }
@@ -93,9 +151,6 @@ class SettingFragment : Fragment() {
         return view
     }
 
-    /**
-     * 💖 核心修改：手动触发时，直接拉取服务器的 JSON 文件，最实时！
-     */
     private fun manualCheckUpdate() {
         Toast.makeText(requireContext(), "正在检查更新...", Toast.LENGTH_SHORT).show()
 
@@ -112,7 +167,6 @@ class SettingFragment : Fragment() {
                         val downloadUrl = jsonObject.optString("url", "")
 
                         if (serverCode > 0 && downloadUrl.isNotEmpty()) {
-                            // 丢给 UpdateManager 去做对比，如果版本不够大，它内部会弹 Toast 说"当前已是最新"
                             updateManager.manualCheckShow(serverCode, versionName, updateLog, downloadUrl)
                         } else {
                             Toast.makeText(requireContext(), "未检测到新版本", Toast.LENGTH_SHORT).show()
