@@ -19,8 +19,8 @@ android {
         applicationId = "cn.xtay.lovejournal"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20100
-        versionName = "2.1.0"
+        versionCode = 20101
+        versionName = "2.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -82,16 +82,15 @@ dependencies {
     // 高德地图
     implementation("com.amap.api:3dmap:10.0.600")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
-    implementation("com.github.prolificinteractive:material-calendarview:2.0.1")
+    implementation(files("libs/material-calendarview-2.0.1.aar"))
     implementation("com.jakewharton.threetenabp:threetenabp:1.4.4")
 
 
 
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // 💖 核心修改：Room 数据库使用 KSP 驱动
-    // 在 build.gradle.kts 中修改版本号
-    val roomVersion = "2.7.0-alpha01" // 或者尝试最新的 alpha 版本
+
+    val roomVersion = "2.7.0-alpha01"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     // 这里不再使用 kapt，改用 ksp
