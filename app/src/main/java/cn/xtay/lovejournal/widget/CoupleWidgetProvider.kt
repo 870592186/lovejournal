@@ -84,24 +84,68 @@ class CoupleWidgetProvider : AppWidgetProvider() {
         val rawBattery = UserPrefs.getWidgetPartnerBattery(context)
         val address = UserPrefs.getWidgetPartnerAddress(context)
 
-        // 💖 3. 状态解析：直接使用中文应用名
+        // 3. 状态解析：直接使用中文应用名
         val statusText = parseAppStatus(appName)
         views.setTextViewText(R.id.widget_tv_status, "TA正在：$statusText")
 
-        // 💖 4. 电量解析：> 100 表示充电中
+        // 4. 电量解析：> 100 表示充电中
         val isCharging = rawBattery > 100
         val actualBattery = if (isCharging) rawBattery - 100 else rawBattery
         val batteryStr = if (isCharging) "⚡ 充电中 $actualBattery%" else "🔋 $actualBattery%"
         views.setTextViewText(R.id.widget_tv_battery, batteryStr)
 
-        // 💖 5. 位置全显
-        val displayAddress = if (address.isEmpty()) "📍 位置保密中 🤫" else "📍 $address"
+        // 💖 5. 智能精简位置：彻底干掉省、市、区、县！
+        val displayAddress = "📍 " + formatShortAddress(address)
         views.setTextViewText(R.id.widget_tv_address, displayAddress)
     }
 
-    /**
-     * 读取并裁切圆形头像
-     */
+
+    private fun formatShortAddress(address: String): String {
+        if (address.isEmpty()) return "位置保密中 🤫"
+        var shortAddr = address
+
+        // 1. 剥掉省、市
+        if (shortAddr.contains("省")) shortAddr = shortAddr.substringAfter("省")
+        if (shortAddr.contains("市")) shortAddr = shortAddr.substringAfter("市")
+
+        // 2. 剥掉区、县
+        if (shortAddr.contains("区")) {
+            shortAddr = shortAddr.substringAfter("区")
+        } else if (shortAddr.contains("县")) {
+            shortAddr = shortAddr.substringAfter("县")
+        }
+
+        // 3. 💖 进一步剥掉“街道”或“镇”（这些名字通常很长且没有实际意义）
+        if (shortAddr.contains("乡")) {
+            shortAddr = shortAddr.substringAfter("乡")
+        } else if (shortAddr.contains("镇")) {
+            shortAddr = shortAddr.substringAfter("镇")
+        }
+
+        // 3. 💖 进一步剥掉“街”或“道”（这些名字通常很长且没有实际意义）
+        if (shortAddr.contains("街")) {
+            shortAddr = shortAddr.substringAfter("街")
+        } else if (shortAddr.contains("道")) {
+            shortAddr = shortAddr.substringAfter("道")
+        }
+
+        // 3. 💖 进一步剥掉“街”或“道”（这些名字通常很长且没有实际意义）
+        if (shortAddr.contains("路")) {
+            shortAddr = shortAddr.substringAfter("路")
+        } else if (shortAddr.contains("号")) {
+            shortAddr = shortAddr.substringAfter("号")
+        }
+
+        shortAddr = shortAddr.trim()
+
+        // 4. 💖 终极兜底：如果这地方名字实在太奇葩，超过了 14 个字，强行截断加省略号
+        if (shortAddr.length > 14) {
+            shortAddr = shortAddr.take(13) + "..."
+        }
+
+        // 如果一顿猛如虎的操作把地址删空了，就退回原地址的前 14 个字
+        return if (shortAddr.isNotBlank()) shortAddr else address.take(14)
+    }
     private fun loadCustomAvatar(context: Context, views: RemoteViews) {
         val avatarFile = File(context.filesDir, "widget_avatar.jpg")
         if (avatarFile.exists()) {
@@ -118,9 +162,6 @@ class CoupleWidgetProvider : AppWidgetProvider() {
         views.setImageViewResource(R.id.widget_avatar, R.drawable.ic_big_heart)
     }
 
-    /**
-     * 转换为完美圆形
-     */
     private fun getCircularBitmap(bitmap: Bitmap): Bitmap {
         val size = Math.min(bitmap.width, bitmap.height)
         val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -143,15 +184,11 @@ class CoupleWidgetProvider : AppWidgetProvider() {
         return output
     }
 
-    /**
-     * 💖 直接使用你底层传过来的中文应用名称进行美化匹配
-     */
     private fun parseAppStatus(appName: String): String {
         if (appName.isEmpty()) return "未知状态 ❓"
         if (appName.contains("息屏")) return "$appName 💤"
         if (appName == "桌面") return "闲逛桌面 👀"
 
-        // 匹配常用 App 加点 Emoji，没匹配到的直接显示
         return when (appName) {
             "微信", "QQ" -> "聊$appName 💬"
             "抖音", "快手", "微视", "小红书" -> "刷$appName 📱"
@@ -171,6 +208,15 @@ class CoupleWidgetProvider : AppWidgetProvider() {
             return
         }
         val userId = UserPrefs.getUserId(context)
+
+        // 💖 优先使用 WebSocket 极速通道秒发！
+        if (cn.xtay.lovejournal.net.WebSocketManager.isConnected) {
+            cn.xtay.lovejournal.net.WebSocketManager.sendMessage("send_to_partner", partnerId, "fly_heart")
+            Toast.makeText(context, "💖 魔法已通过极速通道送达！", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 备用方案：如果网络波动通道断开，走备用的 HTTP
         Toast.makeText(context, "正在发送浪漫魔法...", Toast.LENGTH_SHORT).show()
         NetworkClient.getApi(context).sendCommand(
             userId = userId, partnerId = partnerId, command = "fly_heart", time = System.currentTimeMillis()
@@ -178,8 +224,6 @@ class CoupleWidgetProvider : AppWidgetProvider() {
             override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                 if (response.isSuccessful && response.body()?.status == "success") {
                     Toast.makeText(context, "💖 爱心已送达对方屏幕！", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "发送失败：${response.body()?.message}", Toast.LENGTH_SHORT).show()
                 }
             }
             override fun onFailure(call: Call<UserResponse>, t: Throwable) {

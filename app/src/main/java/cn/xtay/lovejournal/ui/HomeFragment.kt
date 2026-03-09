@@ -12,12 +12,9 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import cn.xtay.lovejournal.R
-import cn.xtay.lovejournal.model.UserResponse
-import cn.xtay.lovejournal.net.NetworkClient
+// 💖 引入 WebSocketManager
+import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.util.UserPrefs
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 
 class HomeFragment : Fragment() {
 
@@ -29,7 +26,6 @@ class HomeFragment : Fragment() {
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        // 加载我们刚才改好名字的布局
         return inflater.inflate(R.layout.fragment_home, container, false)
     }
 
@@ -43,13 +39,23 @@ class HomeFragment : Fragment() {
             if (isSending) return@setOnClickListener
 
             val partnerId = UserPrefs.getPartnerId(requireContext())
-            if (partnerId == 0) {
+            if (partnerId <= 0) {
                 tvStatus.text = "请先在设置中绑定另一半"
                 return@setOnClickListener
             }
 
+            // 检查 WebSocket 通道是否通畅
+            if (!WebSocketManager.isConnected) {
+                tvStatus.text = "通道未连接，请稍后重试"
+                tvStatus.setTextColor(Color.parseColor("#FF5252"))
+                // 尝试重连一下
+                val uid = UserPrefs.getUserId(requireContext())
+                if (uid > 0) WebSocketManager.connect(requireContext(), uid)
+                return@setOnClickListener
+            }
+
             playHeartBeatAnimation(it)
-            sendHeartCommandToServer(partnerId)
+            sendHeartCommandToWebSocket(partnerId)
         }
     }
 
@@ -63,48 +69,24 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun sendHeartCommandToServer(partnerId: Int) {
+    // 💖 核心改造：使用 WebSocket 毫秒级发送指令
+    private fun sendHeartCommandToWebSocket(partnerId: Int) {
         isSending = true
+
+        // 直接通过 WebSocket 瞬间发送出去！
+        WebSocketManager.sendMessage("send_to_partner", partnerId, "fly_heart")
+
+        // 假装有个处理过程，其实已经飞出去了（为了动画的连贯性）
         tvStatus.text = "正在准备浪漫魔法..."
         tvStatus.setTextColor(Color.parseColor("#FF9800"))
 
-        val userId = UserPrefs.getUserId(requireContext())
-        val timeMs = System.currentTimeMillis()
-
-        NetworkClient.getApi(requireContext()).sendCommand(
-            userId = userId,
-            partnerId = partnerId,
-            command = "fly_heart",
-            time = timeMs
-        ).enqueue(object : Callback<UserResponse> {
-            override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
+        tvStatus.postDelayed({
+            if (isAdded) {
                 isSending = false
-                val resBody = response.body()
-
-                // 确保 Fragment 还没被销毁才更新 UI
-                if (!isAdded) return
-
-                if (response.isSuccessful && resBody != null) {
-                    if (resBody.status == "success") {
-                        tvStatus.text = "发送成功！正在飞向 TA 的屏幕..."
-                        tvStatus.setTextColor(Color.parseColor("#4CAF50"))
-                        tvStatus.postDelayed({ if(isAdded) tvStatus.text = "" }, 3000)
-                    } else {
-                        tvStatus.text = "发送失败：${resBody.message}"
-                        tvStatus.setTextColor(Color.parseColor("#FF5252"))
-                    }
-                } else {
-                    tvStatus.text = "服务器未响应，请稍后再试"
-                    tvStatus.setTextColor(Color.parseColor("#FF5252"))
-                }
+                tvStatus.text = "发送成功！魔法已送达 TA 的屏幕 💖"
+                tvStatus.setTextColor(Color.parseColor("#4CAF50"))
+                tvStatus.postDelayed({ if (isAdded) tvStatus.text = "" }, 3000)
             }
-
-            override fun onFailure(call: Call<UserResponse>, t: Throwable) {
-                isSending = false
-                if (!isAdded) return
-                tvStatus.text = "网络连接失败: ${t.message}"
-                tvStatus.setTextColor(Color.parseColor("#FF5252"))
-            }
-        })
+        }, 500) // 延迟 0.5 秒给动画一点时间
     }
 }

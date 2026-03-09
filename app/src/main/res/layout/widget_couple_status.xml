@@ -65,11 +65,11 @@
             android:paddingVertical="4dp"
             android:text="📍 加载位置中..."
             android:textStyle="bold"
-            android:singleLine="true"
+            android:maxLines="2"
             android:ellipsize="end"
             android:autoSizeTextType="uniform"
             android:autoSizeMinTextSize="10sp"
-            android:autoSizeMaxTextSize="14sp"
+            android:autoSizeMaxTextSize="13sp"
             android:autoSizeStepGranularity="1sp" />
     </LinearLayout>
 </LinearLayout>

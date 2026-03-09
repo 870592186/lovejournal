@@ -1,6 +1,5 @@
 package cn.xtay.lovejournal.service
 
-import android.Manifest
 import android.app.*
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,12 +10,7 @@ import android.net.Network
 import android.net.NetworkRequest
 import android.os.*
 import android.provider.Settings
-import android.telephony.CellLocation
-import android.telephony.PhoneStateListener
-import android.telephony.TelephonyCallback
-import android.telephony.TelephonyManager
 import android.widget.Toast
-import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import androidx.work.*
 import cn.xtay.lovejournal.LoginActivity
@@ -26,16 +20,17 @@ import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.model.local.AppDatabase
 import cn.xtay.lovejournal.model.local.LocationEntity
 import cn.xtay.lovejournal.net.NetworkClient
+import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.util.DeviceUtil
 import cn.xtay.lovejournal.util.StrategyManager
 import cn.xtay.lovejournal.util.UserPrefs
-// 💖 新增：导入我们刚写好的 Widget Provider
 import cn.xtay.lovejournal.widget.CoupleWidgetProvider
 import com.amap.api.location.AMapLocationClient
 import com.amap.api.location.AMapLocationClientOption
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -54,9 +49,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            try {
-                applicationContext.startService(intent)
-            } catch (ex: Exception) { ex.printStackTrace() }
+            try { applicationContext.startService(intent) } catch (ex: Exception) { ex.printStackTrace() }
         }
         return Result.success()
     }
@@ -82,12 +75,32 @@ class LocationService : Service() {
     private var lastLng: Double? = null
     private var lastAddr: String? = null
 
-    private var telephonyManager: TelephonyManager? = null
-    private var lastCellId: String? = null
-    private var phoneStateListener: PhoneStateListener? = null
-    private var telephonyCallback: Any? = null
-
     private var pendingClearCommandTime: Long = 0L
+    private var hasSentLowBatteryWarning = false
+    private val syncHandler = Handler(Looper.getMainLooper())
+    private var isScreenOn = true
+
+    // 💖 核心升级：极简的内存监听器，加入“息屏暂存”逻辑！
+    private val wsListener = object : WebSocketManager.MessageListener {
+        override fun onCommandReceived(command: String, data: String) {
+            if (command == "fly_heart") {
+                if (isScreenOn) {
+                    // 1. 如果屏幕亮着，0 毫秒延迟立刻弹爱心！
+                    cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
+                    uploadData(lastLat, lastLng, lastAddr, "✅ 实时响应浪漫魔法")
+                } else {
+                    // 2. 💖 如果息屏了，偷偷存进缓存，等亮屏的时候再炸出来！
+                    val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean("pending_heart", true).apply()
+                }
+            } else if (command == "low_battery_alert") {
+                val msg = if (data.contains("msg")) JSONObject(data).optString("msg") else "TA的手机电量严重不足！"
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(this@LocationService, "🚨 紧急通知：$msg", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     private fun acquireTempWakeLock(timeoutMs: Long = 30000L) {
         if (tempWakeLock == null) {
@@ -98,88 +111,40 @@ class LocationService : Service() {
         tempWakeLock?.acquire(timeoutMs)
     }
 
-    private val heartbeatHandler = Handler(Looper.getMainLooper())
-    private var isScreenOn = true
-    private var screenOffTime = 0L
-    private var lastLocationTime = 0L
-    private var lastUploadTime = 0L
-
-    private val heartbeatRunnable = Runnable { checkAndExecuteHeartbeat() }
-
-    private fun checkAndExecuteHeartbeat() {
-        if (!isScreenOn) return
-
-        if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
-
-        StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
-            pendingClearCommandTime = commandTime
-            uploadData(lastLat, lastLng, lastAddr, "✅ 已执行远控指令")
-        }
-
-        val batteryLevel = DeviceUtil.getBatteryLevel(this)
-        val isIntercepted = StrategyManager.shouldIntercept(this, batteryLevel) { msg ->
-            uploadData(lastLat, lastLng, lastAddr, msg)
-        }
-
-        if (isIntercepted) {
-            scheduleNextHeartbeat()
-            return
-        }
-
-        val now = System.currentTimeMillis()
-        val syncInterval = 30000L
-        val gpsInterval = 300000L
-
-        if (now - lastUploadTime < syncInterval - 5000L) {
-            scheduleNextHeartbeat()
-            return
-        }
-
-        lastUploadTime = now
-        val isWifiConnected = (lastNetType == "WiFi")
-
-        if (isWifiConnected) {
-            uploadData(lastLat, lastLng, lastAddr, null)
-        } else {
-            if (now - lastLocationTime >= gpsInterval - 15000L) {
-                triggerSingleLocation(false)
-                lastLocationTime = now
-            } else {
-                uploadData(lastLat, lastLng, lastAddr, null)
-            }
-        }
-        scheduleNextHeartbeat()
-    }
-
-    private fun scheduleNextHeartbeat() {
-        heartbeatHandler.removeCallbacks(heartbeatRunnable)
-        if (isScreenOn) {
-            heartbeatHandler.postDelayed(heartbeatRunnable, 30000L)
-        }
-    }
-
-    private fun handleCellLocationChange(location: CellLocation?) {
-        val currentCellId = location?.toString()
-        if (currentCellId != null && currentCellId != lastCellId) {
-            lastCellId = currentCellId
-
-            if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
-
-            if (!isScreenOn && lastNetType != "WiFi") {
-                val now = System.currentTimeMillis()
-
-                if (now - lastLocationTime >= 300000L) {
-                    acquireTempWakeLock(60000L)
-
-                    val customVal = UserPrefs.getNotifMoving(this)
-                    val displayMsg = if (customVal.isNotEmpty()) customVal else "🚶 移动基站切换中..."
-
-                    uploadData(lastLat, lastLng, lastAddr, displayMsg)
-                    triggerSingleLocation(true)
-
-                    lastLocationTime = now
+    private val deviceSyncRunnable = object : Runnable {
+        override fun run() {
+            if (isScreenOn) {
+                checkLowBatteryAndSync()
+                if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") {
+                    uploadData(lastLat, lastLng, lastAddr, null)
                 }
             }
+            syncHandler.postDelayed(this, 60000L)
+        }
+    }
+
+    private val locationSyncRunnable = object : Runnable {
+        override fun run() {
+            if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") {
+                triggerSingleLocation(false)
+            }
+            syncHandler.postDelayed(this, 300000L)
+        }
+    }
+
+    private fun checkLowBatteryAndSync() {
+        val battery = DeviceUtil.getBatteryLevel(this)
+        if (battery <= 10 && !hasSentLowBatteryWarning) {
+            hasSentLowBatteryWarning = true
+            triggerSingleLocation(true)
+            val partnerId = UserPrefs.getPartnerId(this)
+            if (partnerId > 0) {
+                val data = JSONObject().apply { put("msg", "TA的手机电量仅剩 $battery%，即将失联！") }
+                WebSocketManager.sendMessage("send_to_partner", partnerId, "low_battery_alert", data)
+            }
+            uploadData(lastLat, lastLng, lastAddr, "⚠️电量濒危($battery%)")
+        } else if (battery > 15) {
+            hasSentLowBatteryWarning = false
         }
     }
 
@@ -189,32 +154,37 @@ class LocationService : Service() {
                 Intent.ACTION_SCREEN_OFF -> {
                     StrategyManager.reset()
                     isScreenOn = false
-                    screenOffTime = System.currentTimeMillis()
-                    heartbeatHandler.removeCallbacksAndMessages(null)
-
-                    if (DeviceUtil.getNetworkInfo(this@LocationService).first == "无网络") return
-
+                    syncHandler.removeCallbacksAndMessages(null)
                     acquireTempWakeLock(60000L)
-                    uploadData(lastLat, lastLng, lastAddr, null)
-
-                    if (lastNetType != "WiFi") {
-                        triggerSingleLocation(true)
-                    }
+                    triggerSingleLocation(true)
 
                     val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
                     WorkManager.getInstance(this@LocationService).enqueueUniquePeriodicWork(
-                        WORK_NAME,
-                        ExistingPeriodicWorkPolicy.KEEP,
-                        workRequest
+                        WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, workRequest
                     )
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
                     WorkManager.getInstance(this@LocationService).cancelUniqueWork(WORK_NAME)
-
                     acquireTempWakeLock()
-                    lastUploadTime = 0L
-                    checkAndExecuteHeartbeat()
+
+                    // 💖 核心新增：亮屏瞬间检查潜伏的爱心！
+                    val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+                    if (prefs.getBoolean("pending_heart", false)) {
+                        // 擦除标记，防止无限循环弹
+                        prefs.edit().putBoolean("pending_heart", false).apply()
+
+                        // 延迟 1.5 秒播放（让用户有足够的时间看清屏幕解锁后的界面，然后突然被爱心包围！）
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
+                            uploadData(lastLat, lastLng, lastAddr, "✅ 亮屏补发错过的魔法")
+                        }, 1500)
+                    }
+
+                    checkLowBatteryAndSync()
+                    triggerSingleLocation(false)
+                    syncHandler.postDelayed(deviceSyncRunnable, 60000L)
+                    syncHandler.postDelayed(locationSyncRunnable, 300000L)
                 }
             }
         }
@@ -222,7 +192,6 @@ class LocationService : Service() {
 
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-
     private var lastNetType: String = "UNINITIALIZED"
     private var lastWifiName: String? = null
 
@@ -230,27 +199,23 @@ class LocationService : Service() {
         val (netType, currentWifiName) = DeviceUtil.getNetworkInfo(this@LocationService)
         val newWifi = if (netType == "WiFi") currentWifiName else null
 
-        val isNetworkChanged = (netType != lastNetType) || (newWifi != lastWifiName)
-
-        if (isNetworkChanged) {
+        if (netType != lastNetType || newWifi != lastWifiName) {
             lastNetType = netType
             lastWifiName = newWifi
 
             if (netType == "无网络") {
-                val customOff = UserPrefs.getNotifOffline(this@LocationService)
-                val displayMsg = if (customOff.isNotEmpty()) customOff else "无网络连接，已暂停后台同步"
-
-                updateNotification(displayMsg)
-                heartbeatHandler.removeCallbacks(locationRunnable)
+                updateNotification(UserPrefs.getNotifOffline(this@LocationService).ifEmpty { "无网络连接，已暂停后台同步" })
+                WebSocketManager.disconnect()
                 return@Runnable
+            }
+
+            val uid = UserPrefs.getUserId(this@LocationService)
+            if (uid > 0 && !WebSocketManager.isConnected) {
+                WebSocketManager.connect(this@LocationService, uid)
             }
 
             StrategyManager.reset()
             acquireTempWakeLock(60000L)
-
-            val now = System.currentTimeMillis()
-            lastLocationTime = now
-            lastUploadTime = now
 
             val statusMsg = when (netType) {
                 "WiFi" -> "刚连上 $newWifi"
@@ -258,14 +223,8 @@ class LocationService : Service() {
                 else -> "网络状态刷新"
             }
             uploadData(lastLat, lastLng, lastAddr, statusMsg)
-
             triggerSingleLocation(true)
-
-            val customNormal = UserPrefs.getNotifNormal(this@LocationService)
-            val baseMsg = if (customNormal.isNotEmpty()) customNormal else "守护中：网络正常"
-            updateNotification("$baseMsg (${netType})")
-
-            if (isScreenOn) scheduleNextHeartbeat()
+            updateNotification("${UserPrefs.getNotifNormal(this@LocationService).ifEmpty { "守护中：网络正常" }} (${netType})")
         }
     }
 
@@ -273,18 +232,16 @@ class LocationService : Service() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                acquireTempWakeLock(20000L)
-                heartbeatHandler.removeCallbacks(networkCheckRunnable)
-                heartbeatHandler.postDelayed(networkCheckRunnable, 1500L)
+                syncHandler.removeCallbacks(networkCheckRunnable)
+                syncHandler.postDelayed(networkCheckRunnable, 1500L)
             }
             override fun onLost(network: Network) {
-                acquireTempWakeLock(20000L)
-                heartbeatHandler.removeCallbacks(networkCheckRunnable)
-                heartbeatHandler.postDelayed(networkCheckRunnable, 1500L)
+                syncHandler.removeCallbacks(networkCheckRunnable)
+                syncHandler.postDelayed(networkCheckRunnable, 1500L)
             }
         }
         connectivityManager?.registerNetworkCallback(NetworkRequest.Builder().build(), networkCallback!!)
-        heartbeatHandler.post(networkCheckRunnable)
+        syncHandler.post(networkCheckRunnable)
     }
 
     override fun onCreate() {
@@ -294,70 +251,51 @@ class LocationService : Service() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         isScreenOn = pm.isInteractive
 
-        if (!isScreenOn) {
-            screenOffTime = System.currentTimeMillis()
-        }
-
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification("守护引擎初始化中..."))
 
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF).apply { addAction(Intent.ACTION_SCREEN_ON) }
         registerReceiver(screenStateReceiver, filter)
 
-        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            telephonyCallback = object : TelephonyCallback(), TelephonyCallback.CellLocationListener {
-                override fun onCellLocationChanged(location: CellLocation) {
-                    handleCellLocationChange(location)
-                }
-            }
-            telephonyManager?.registerTelephonyCallback(mainExecutor, telephonyCallback as TelephonyCallback)
-        } else {
-            phoneStateListener = object : PhoneStateListener() {
-                @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                override fun onCellLocationChanged(location: CellLocation?) {
-                    super.onCellLocationChanged(location)
-                    handleCellLocationChange(location)
-                }
-            }
-            telephonyManager?.listen(phoneStateListener, PhoneStateListener.LISTEN_CELL_LOCATION)
-        }
-
         initAMapLocation()
         initNetworkObserver()
 
-        checkAndExecuteHeartbeat()
+        val uid = UserPrefs.getUserId(this)
+        if (uid > 0) WebSocketManager.connect(this, uid)
+
+        // 🚀 挂载极速内存监听器
+        WebSocketManager.addListener(wsListener)
+
+        if (isScreenOn) {
+            syncHandler.post(deviceSyncRunnable)
+            syncHandler.post(locationSyncRunnable)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_UPDATE_NOTIF") {
             val netInfo = DeviceUtil.getNetworkInfo(this).first
             if (netInfo == "无网络") {
-                val customOff = UserPrefs.getNotifOffline(this)
-                val displayMsg = if (customOff.isNotEmpty()) customOff else "无网络连接，已暂停后台同步"
-                updateNotification(displayMsg)
+                updateNotification(UserPrefs.getNotifOffline(this).ifEmpty { "无网络连接，已暂停后台同步" })
             } else {
-                val customNormal = UserPrefs.getNotifNormal(this)
-                val baseMsg = if (customNormal.isNotEmpty()) customNormal else "守护中：网络正常"
-                updateNotification("$baseMsg ($netInfo)")
+                updateNotification("${UserPrefs.getNotifNormal(this).ifEmpty { "守护中：网络正常" }} ($netInfo)")
             }
             return START_STICKY
         }
 
         if (intent?.action == "ACTION_WORKER_SYNC") {
             if (DeviceUtil.getNetworkInfo(this).first == "无网络") return START_STICKY
-
             acquireTempWakeLock(60000L)
+
+            val uid = UserPrefs.getUserId(this)
+            if (uid > 0 && !WebSocketManager.isConnected) WebSocketManager.connect(this, uid)
 
             StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
                 pendingClearCommandTime = commandTime
             }
 
-            if (lastNetType == "WiFi") {
-                uploadData(lastLat, lastLng, lastAddr, null)
-            } else {
-                triggerSingleLocation(false)
-            }
+            if (lastNetType == "WiFi") uploadData(lastLat, lastLng, lastAddr, null)
+            else triggerSingleLocation(false)
         }
         return START_STICKY
     }
@@ -369,57 +307,30 @@ class LocationService : Service() {
                 if (location != null) {
                     if (location.errorCode == 0) {
                         isFallbackToGps = false
-
                         val dbLog = LocationEntity(
-                            latitude = location.latitude,
-                            longitude = location.longitude,
-                            address = location.address ?: "未知地址",
-                            timestamp = System.currentTimeMillis(),
-                            locationType = location.locationType,
-                            accuracy = location.accuracy
+                            latitude = location.latitude, longitude = location.longitude,
+                            address = location.address ?: "未知地址", timestamp = System.currentTimeMillis(),
+                            locationType = location.locationType, accuracy = location.accuracy
                         )
                         CoroutineScope(Dispatchers.IO).launch {
                             val db = AppDatabase.getDatabase(applicationContext)
                             db.locationDao().insertLog(dbLog)
                             db.locationDao().trimDatabase()
                         }
-
                         if (location.locationType == 1 || location.locationType == 5 || location.locationType == 6) {
                             lastLat = location.latitude
                             lastLng = location.longitude
                             lastAddr = location.address ?: ""
                         }
                         uploadData(lastLat, lastLng, lastAddr, null)
-
                     } else {
                         if (!isFallbackToGps) {
                             isFallbackToGps = true
-                            heartbeatHandler.post(locationRunnable)
+                            syncHandler.post(locationRunnable)
                             return@setLocationListener
                         }
-
                         isFallbackToGps = false
-
-                        val errorLog = LocationEntity(
-                            latitude = 0.0,
-                            longitude = 0.0,
-                            address = "高德异常: ${location.errorInfo}",
-                            timestamp = System.currentTimeMillis(),
-                            locationType = -location.errorCode,
-                            accuracy = 0f
-                        )
-                        CoroutineScope(Dispatchers.IO).launch {
-                            val db = AppDatabase.getDatabase(applicationContext)
-                            db.locationDao().insertLog(errorLog)
-                            db.locationDao().trimDatabase()
-                        }
-
-                        lastLocationTime = 0L
-
-                        val customErr = UserPrefs.getNotifError(this@LocationService)
-                        val displayMsg = if (customErr.isNotEmpty()) customErr else "⚠️ 信号盲区/波动"
-
-                        uploadData(lastLat, lastLng, lastAddr, displayMsg)
+                        uploadData(lastLat, lastLng, lastAddr, UserPrefs.getNotifError(this@LocationService).ifEmpty { "⚠️ 信号盲区/波动" })
                     }
                 }
             }
@@ -431,7 +342,6 @@ class LocationService : Service() {
             val option = AMapLocationClientOption().apply {
                 isNeedAddress = true
                 isOnceLocation = true
-
                 if (isFallbackToGps) {
                     locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
                     isGpsFirst = true
@@ -452,30 +362,19 @@ class LocationService : Service() {
 
     private fun triggerSingleLocation(isEmergency: Boolean = false) {
         this.isEmergencyLocation = isEmergency
-        heartbeatHandler.removeCallbacks(locationRunnable)
-        heartbeatHandler.postDelayed(locationRunnable, 2500)
+        syncHandler.removeCallbacks(locationRunnable)
+        syncHandler.postDelayed(locationRunnable, 2500)
     }
 
     private fun uploadData(lat: Double?, lng: Double?, addr: String?, fgAppOverride: String? = null) {
         if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
-
         val uid = UserPrefs.getUserId(this)
         if (uid == -1 || UserPrefs.getPartnerId(this) <= 0) return
 
         val battery = DeviceUtil.getBatteryLevel(this)
         val (netType, wifiName) = DeviceUtil.getNetworkInfo(this)
         val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-
-        val finalFgApp = if (!isScreenOn) {
-            if (fgAppOverride != null) {
-                fgAppOverride
-            } else {
-                val diffMins = (System.currentTimeMillis() - screenOffTime) / 60000
-                if (diffMins <= 0L) "息屏" else "已息屏 ${diffMins}分钟"
-            }
-        } else {
-            fgAppOverride ?: DeviceUtil.getForegroundApp(this)
-        }
+        val finalFgApp = fgAppOverride ?: if (!isScreenOn) "息屏睡眠 💤" else DeviceUtil.getForegroundApp(this)
 
         NetworkClient.getApi(this).syncAll(
             action = "sync_all", userId = uid, deviceId = deviceId, lat = lat, lng = lng, address = addr,
@@ -490,26 +389,14 @@ class LocationService : Service() {
                     if (body.status == "error_kicked") {
                         handleKickedOffline(body.message ?: "账号已在别处登录")
                     } else if (body.status == "success") {
-                        // 1. 保存配置
-                        body.server_config?.let { config ->
-                            UserPrefs.saveServerConfigData(this@LocationService, config)
-                        }
-
-                        // 💖 2. 核心新增：提取伴侣的实时数据供小组件使用！
+                        body.server_config?.let { UserPrefs.saveServerConfigData(this@LocationService, it) }
                         body.partner_data?.let { pd ->
-                            // 解析对方的电量和App状态
-                            val partnerBat = pd.device?.battery ?: 0
-                            val partnerApp = pd.device?.foreground_app ?: ""
-                            // 解析对方的地址
-                            val partnerAddr = pd.location?.address ?: ""
-
-                            // 存入专属缓存
-                            UserPrefs.saveWidgetData(this@LocationService, partnerBat, partnerApp, partnerAddr)
-
-                            // 🚀 触发小组件全局刷新！
+                            UserPrefs.saveWidgetData(
+                                this@LocationService, pd.device?.battery ?: 0,
+                                pd.device?.foreground_app ?: "", pd.location?.address ?: ""
+                            )
                             CoupleWidgetProvider.updateAllWidgets(this@LocationService)
                         }
-
                         pendingClearCommandTime = 0L
                     }
                 }
@@ -521,33 +408,20 @@ class LocationService : Service() {
     private fun handleKickedOffline(reason: String) {
         UserPrefs.clear(this)
         stopSelf()
-        val intent = Intent(this, LoginActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        startActivity(intent)
-        Handler(Looper.getMainLooper()).postDelayed({
-            Toast.makeText(applicationContext, "⚠️ 强制下线: $reason", Toast.LENGTH_LONG).show()
-        }, 500)
+        startActivity(Intent(this, LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })
+        Handler(Looper.getMainLooper()).postDelayed({ Toast.makeText(applicationContext, "⚠️ 强制下线: $reason", Toast.LENGTH_LONG).show() }, 500)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         isRunning = false
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            telephonyCallback?.let {
-                telephonyManager?.unregisterTelephonyCallback(it as TelephonyCallback)
-            }
-        } else {
-            phoneStateListener?.let {
-                telephonyManager?.listen(it, PhoneStateListener.LISTEN_NONE)
-            }
-        }
-
-        heartbeatHandler.removeCallbacksAndMessages(null)
+        WebSocketManager.removeListener(wsListener)
+        WebSocketManager.disconnect()
+        syncHandler.removeCallbacksAndMessages(null)
         WorkManager.getInstance(this).cancelUniqueWork(WORK_NAME)
         unregisterReceiver(screenStateReceiver)
+
         networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
         mLocationClient?.stopLocation()
         mLocationClient?.onDestroy()
@@ -558,9 +432,7 @@ class LocationService : Service() {
     private fun createNotification(content: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-
-        val customTitle = UserPrefs.getNotifTitle(this)
-        val displayTitle = if (customTitle.isNotEmpty()) customTitle else "情侣手记实时守护中"
+        val displayTitle = UserPrefs.getNotifTitle(this).ifEmpty { "情侣手记实时守护中" }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(displayTitle)
@@ -573,8 +445,7 @@ class LocationService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, createNotification(text))
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(text))
     }
 
     private fun createNotificationChannel() {

@@ -18,6 +18,7 @@ import cn.xtay.lovejournal.R
 import cn.xtay.lovejournal.model.PeriodRecord
 import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.net.NetworkClient
+import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.util.UserPrefs
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -40,12 +41,10 @@ class PeriodFragment : Fragment() {
     private lateinit var btnLeft: MaterialButton
     private lateinit var btnRight: MaterialButton
 
-    // 💖 纪念日新增 View
     private lateinit var tvSelectedMemo: TextView
     private lateinit var btnEditMemo: MaterialButton
     private lateinit var llMemoList: LinearLayout
 
-    // 💖 下拉刷新组件
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
 
     private var selectedLocalDate: LocalDate = LocalDate.now()
@@ -56,27 +55,15 @@ class PeriodFragment : Fragment() {
     private var isUpdatingUI = false
     private val syncHandler = Handler(Looper.getMainLooper())
     private var isOperationLocked = false
-
-    // 💖 新增：刷新防抖与 5 秒智能静默轮询机制
     private var lastFetchTime = 0L
-    private var userInteractionTime = 0L
-    private val autoRefreshRunnable = object : Runnable {
-        override fun run() {
-            val now = System.currentTimeMillis()
-            // 如果用户距上次操作已超过 5 秒，且没有被锁定的操作，则触发静默刷新
-            if (now - userInteractionTime >= 5000 && !isOperationLocked) {
+
+    // 💖 核心升级：前台页面专用的极速内存监听器
+    private val wsListener = object : WebSocketManager.MessageListener {
+        override fun onCommandReceived(command: String, data: String) {
+            if (command == "sync_period") {
                 fetchData(isSilent = true)
             }
-            // 循环投递：每 5 秒检查一次
-            syncHandler.postDelayed(this, 5000)
         }
-    }
-
-    /**
-     * 💖 统一记录用户交互时间，延迟自动刷新
-     */
-    private fun recordInteraction() {
-        userInteractionTime = System.currentTimeMillis()
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -89,12 +76,11 @@ class PeriodFragment : Fragment() {
         toggleGroup = view.findViewById(R.id.toggle_status_group)
         btnLeft = view.findViewById(R.id.btn_status_left)
         btnRight = view.findViewById(R.id.btn_status_right)
-
         swipeRefreshLayout = view.findViewById(R.id.swipe_refresh_layout)
-
         tvSelectedMemo = view.findViewById(R.id.tv_selected_memo)
         btnEditMemo = view.findViewById(R.id.btn_edit_memo)
         llMemoList = view.findViewById(R.id.ll_memo_list)
+
         val todayDay = CalendarDay.from(selectedLocalDate)
         calendarView.selectedDate = todayDay
         calendarView.setCurrentDate(todayDay, false)
@@ -105,12 +91,10 @@ class PeriodFragment : Fragment() {
         swipeRefreshLayout.setColorSchemeColors(typedValue.data)
 
         swipeRefreshLayout.setOnRefreshListener {
-            recordInteraction() // 下拉刷新也算交互
             fetchData(isSilent = false)
         }
 
         calendarView.setOnDateChangedListener { _, date, _ ->
-            recordInteraction()
             selectedLocalDate = LocalDate.of(date.year, date.month, date.day)
             tvDateLabel.text = "当前选中：$selectedLocalDate"
             refreshUIState()
@@ -118,7 +102,6 @@ class PeriodFragment : Fragment() {
 
         toggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isUpdatingUI || !isChecked) return@addOnButtonCheckedListener
-            recordInteraction()
 
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "请先绑定另一半才能开启甜蜜记录哦~", Toast.LENGTH_SHORT).show()
@@ -149,7 +132,6 @@ class PeriodFragment : Fragment() {
         }
 
         val longClick = View.OnLongClickListener {
-            recordInteraction()
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "请先绑定另一半才能开启甜蜜记录哦~", Toast.LENGTH_SHORT).show()
                 return@OnLongClickListener true
@@ -166,7 +148,6 @@ class PeriodFragment : Fragment() {
         btnRight.setOnLongClickListener(longClick)
 
         btnEditMemo.setOnClickListener {
-            recordInteraction()
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "绑定另一半后，一起记录专属纪念日吧~", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -178,7 +159,6 @@ class PeriodFragment : Fragment() {
     }
 
     private fun showMemoEditDialog() {
-        recordInteraction()
         val dateStr = selectedLocalDate.toString()
         val currentRec = allRecords.find { it.date == dateStr }
         val currentMemo = currentRec?.memo ?: ""
@@ -195,17 +175,13 @@ class PeriodFragment : Fragment() {
             .setTitle("设置 ${selectedLocalDate.year}年${selectedLocalDate.monthValue}月${selectedLocalDate.dayOfMonth}日")
             .setView(input)
             .setPositiveButton("保存") { _, _ ->
-                recordInteraction()
                 val newMemo = input.text.toString().trim()
                 saveMemoData(dateStr, currentStatus, newMemo)
             }
-            .setNegativeButton("取消") { _, _ -> recordInteraction() }
+            .setNegativeButton("取消", null)
 
         if (currentMemo.isNotEmpty()) {
-            builder.setNeutralButton("删除纪念日") { _, _ ->
-                recordInteraction()
-                saveMemoData(dateStr, currentStatus, "")
-            }
+            builder.setNeutralButton("删除纪念日") { _, _ -> saveMemoData(dateStr, currentStatus, "") }
         }
 
         val dialog = builder.create()
@@ -308,6 +284,7 @@ class PeriodFragment : Fragment() {
         ).enqueue(object : Callback<UserResponse> {
             override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                 syncHandler.postDelayed({ isOperationLocked = false }, 2000)
+                notifyPartnerToRefresh()
             }
             override fun onFailure(call: Call<UserResponse>, t: Throwable) {
                 Toast.makeText(context, "同步失败", Toast.LENGTH_SHORT).show()
@@ -316,13 +293,15 @@ class PeriodFragment : Fragment() {
         })
     }
 
-    /**
-     * 💖 智能刷新方法
-     * @param isSilent 如果是自动刷新或切换页面，设为 true 不会弹出任何 Toast 提示
-     */
+    private fun notifyPartnerToRefresh() {
+        val partnerId = UserPrefs.getPartnerId(requireContext())
+        if (partnerId > 0 && WebSocketManager.isConnected) {
+            WebSocketManager.sendMessage("send_to_partner", partnerId, "sync_period")
+        }
+    }
+
     private fun fetchData(isSilent: Boolean) {
         val now = System.currentTimeMillis()
-        // 1. 防抖拦截：如果距离上次刷新不足 1 秒，直接取消本次刷新动作
         if (now - lastFetchTime < 1000) {
             swipeRefreshLayout.isRefreshing = false
             return
@@ -332,16 +311,12 @@ class PeriodFragment : Fragment() {
         val pid = UserPrefs.getPartnerId(requireContext())
         if (uid != -1 && pid > 0) {
 
-            // 2. 只有非静默的主动刷新（比如用户用力下拉），才展示提示语
             if (!isSilent && swipeRefreshLayout.isRefreshing) {
                 Toast.makeText(context, "正在同步另一半的最新数据...", Toast.LENGTH_SHORT).show()
             }
 
             lastFetchTime = now
-
-            if (!swipeRefreshLayout.isRefreshing && !isSilent) {
-                swipeRefreshLayout.isRefreshing = true
-            }
+            if (!swipeRefreshLayout.isRefreshing && !isSilent) swipeRefreshLayout.isRefreshing = true
 
             NetworkClient.getApi(requireContext()).getPeriods(action = "get_periods", userId = uid, partnerId = pid)
                 .enqueue(object : Callback<UserResponse> {
@@ -351,7 +326,6 @@ class PeriodFragment : Fragment() {
                         if (res?.status == "success") {
                             allRecords = (res.periods_data ?: emptyList()).toMutableList()
                             UserPrefs.saveLocalPeriods(requireContext(), Gson().toJson(allRecords))
-                            // 注意：静默刷新时，即使重绘日历，用户在视觉上只会看到数据的无缝变化
                             calculateAndRender()
                         }
                     }
@@ -487,7 +461,6 @@ class PeriodFragment : Fragment() {
 
                 setOnClickListener {
                     try {
-                        recordInteraction() // 点击列表也算交互
                         val parsedDate = LocalDate.parse(rec.date)
                         calendarView.selectedDate = CalendarDay.from(parsedDate)
                         calendarView.setCurrentDate(CalendarDay.from(parsedDate), true)
@@ -543,10 +516,16 @@ class PeriodFragment : Fragment() {
                         NetworkClient.getApi(requireContext()).updatePeriod(
                             action = "update_period", userId = uid, date = endRec.first.toString(), status = 0, memo = endMemo
                         ).enqueue(object : Callback<UserResponse>{
-                            override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) { syncHandler.postDelayed({ isOperationLocked = false }, 2000) }
+                            override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
+                                syncHandler.postDelayed({ isOperationLocked = false }, 2000)
+                                notifyPartnerToRefresh()
+                            }
                             override fun onFailure(call: Call<UserResponse>, t: Throwable) { syncHandler.postDelayed({ isOperationLocked = false }, 2000) }
                         })
-                    } else { syncHandler.postDelayed({ isOperationLocked = false }, 2000) }
+                    } else {
+                        syncHandler.postDelayed({ isOperationLocked = false }, 2000)
+                        notifyPartnerToRefresh()
+                    }
                 }
                 override fun onFailure(call: Call<UserResponse>, t: Throwable) { syncHandler.postDelayed({ isOperationLocked = false }, 2000) }
             })
@@ -554,7 +533,6 @@ class PeriodFragment : Fragment() {
     }
 
     private fun showDeleteBlockDialog() {
-        recordInteraction()
         AlertDialog.Builder(requireContext()).setTitle("清理记录").setMessage("确定要清理这整段经期记录吗？(不会删除你的纪念日)")
             .setPositiveButton("确定") { _, _ -> deepClearBlock() }
             .setNegativeButton("取消") { _, _ -> refreshUIState() }.show()
@@ -562,16 +540,15 @@ class PeriodFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // 刚进入页面时，触发一次静默同步
         fetchData(isSilent = true)
-        // 启动 5 秒智能轮询循环
-        syncHandler.postDelayed(autoRefreshRunnable, 5000)
+        // 🚀 挂载纯粹的内存监听，告别广播时代！
+        WebSocketManager.addListener(wsListener)
     }
 
     override fun onPause() {
         super.onPause()
-        // 离开页面时，销毁一切 Handler 循环，节省性能
-        syncHandler.removeCallbacksAndMessages(null)
         isOperationLocked = false
+        // 🚀 离开页面立刻卸载监听，防内存泄露！
+        WebSocketManager.removeListener(wsListener)
     }
 }

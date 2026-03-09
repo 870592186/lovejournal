@@ -1,75 +1,60 @@
 package cn.xtay.lovejournal.util
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.ImageView
-import cn.xtay.lovejournal.R  // ⚠️ 注意：如果报错，请换成你自己的包名下的 R
-import com.bumptech.glide.Glide // 💖 导入 Glide
+import android.widget.Toast
+import cn.xtay.lovejournal.R
+import com.bumptech.glide.Glide
 
 object HeartEffectUtil {
 
     fun showFloatingHeart(context: Context) {
-        // 确保在主线程运行，悬浮窗是 UI 操作
         if (Looper.myLooper() != Looper.getMainLooper()) {
             Handler(Looper.getMainLooper()).post { showFloatingHeart(context) }
             return
         }
 
+        // 💖 终极杀招：检查悬浮窗权限！如果没有，直接提示并跳去设置页！
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+            Toast.makeText(context, "⛔ 无法弹出爱心！请先授予【显示在其他应用上层】权限！", Toast.LENGTH_LONG).show()
+            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            return
+        }
+
         try {
             val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val heartView = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
 
-            // 1. 创建 ImageView 来承载动画
-            val heartView = ImageView(context).apply {
-                scaleType = ImageView.ScaleType.FIT_CENTER
-            }
+            Glide.with(context).asGif().load(R.drawable.ic_heart_anim).into(heartView)
 
-            // 💖 2. 使用 Glide 丝滑加载透明 GIF 动图
-            Glide.with(context)
-                .asGif()
-                .load(R.drawable.ic_heart_anim) // 你的 GIF 文件名
-                .into(heartView)
-
-            // 3. 配置无焦点、可穿透的悬浮窗参数
             val params = WindowManager.LayoutParams().apply {
                 width = WindowManager.LayoutParams.MATCH_PARENT
                 height = WindowManager.LayoutParams.MATCH_PARENT
-
-                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                } else {
-                    @Suppress("DEPRECATION")
-                    WindowManager.LayoutParams.TYPE_PHONE
-                }
-
-                // 🌟 灵魂所在：不可触碰 (穿透) + 无焦点 + 允许延伸到刘海屏
-                flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-
-                format = PixelFormat.TRANSLUCENT // 窗口背景完全透明
+                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+                flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                format = PixelFormat.TRANSLUCENT
                 gravity = Gravity.CENTER
             }
 
-            // 4. 添加到屏幕
             windowManager.addView(heartView, params)
-
-            // 5. 定时销毁：这里设置 4000 毫秒（4秒）。
-            // 💡 如果你的 GIF 比较长，可以把这个数字改大一点，比如 6000！
             Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    windowManager.removeView(heartView)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+                try { windowManager.removeView(heartView) } catch (e: Exception) { e.printStackTrace() }
             }, 6000)
 
         } catch (e: Exception) {
-            e.printStackTrace() // 防止没给悬浮窗权限时崩溃
+            e.printStackTrace()
+            Toast.makeText(context, "爱心渲染失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }

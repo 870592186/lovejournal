@@ -28,7 +28,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -45,9 +45,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.情侣手记"
-        android:usesCleartextTraffic="true"
-        tools:ignore="ExtraText">
-
+        tools:ignore="ExtraText"
+        android:usesCleartextTraffic="true" >
         <service android:name="com.amap.api.location.APSService" />
 
         <service
