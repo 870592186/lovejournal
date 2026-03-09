@@ -15,6 +15,7 @@ import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.model.local.AppDatabase
 import cn.xtay.lovejournal.model.local.LocationEntity
 import cn.xtay.lovejournal.net.NetworkClient
+import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.util.DeviceUtil
 import cn.xtay.lovejournal.util.UserPrefs
 import com.amap.api.location.AMapLocationClient
@@ -47,34 +48,16 @@ class MapFragment : Fragment() {
 
     private val dbDateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
 
-    // 滑动窗口限流器变量
-    private val clickTimes = mutableListOf<Long>()
-    private var penaltyEndTime = 0L
+    // 极简冷却机制，告别卡顿屎山
+    private var lastRefreshTime = 0L
+    private var lastLocateTaTime = 0L
 
-    private fun isClickSafe(): Boolean {
-        val now = System.currentTimeMillis()
-        if (now < penaltyEndTime) {
-            Toast.makeText(context, "点击过快请稍后再试", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        clickTimes.removeAll { now - it > 10000 }
-        val clicksInLastSecond = clickTimes.count { now - it <= 1000 }
-        if (clicksInLastSecond >= 3 || clickTimes.size >= 15) {
-            penaltyEndTime = now + 10000
-            Toast.makeText(context, "点击过快请稍后再试", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        clickTimes.add(now)
-        return true
-    }
-
-    private fun getPartnerName(): String {
-        return UserPrefs.getPartnerNickname(requireContext()) ?: "对方"
-    }
+    private fun getPartnerName() = UserPrefs.getPartnerNickname(requireContext()) ?: "对方"
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val view = inflater.inflate(R.layout.fragment_map, container, false)
 
+        // 这里的 mapView 外层在 XML 里应该已经被你的 MapContainer 包裹了，防冲突交由 MapContainer 处理
         mapView = view.findViewById(R.id.map_view)
         tvMyAddr = view.findViewById(R.id.tv_my_address)
         tvPartnerAddr = view.findViewById(R.id.tv_partner_address)
@@ -89,8 +72,15 @@ class MapFragment : Fragment() {
 
         tvMyAddr.text = renderStyledLocation("我的位置：", "等待刷新...", null, false)
 
+        // 🟢 刷新自己的位置 (3秒极简防抖)
         btnRefresh.setOnClickListener {
-            if (!isClickSafe()) return@setOnClickListener
+            val now = System.currentTimeMillis()
+            if (now - lastRefreshTime < 3000) {
+                Toast.makeText(context, "刷新太快啦，休息一下~", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            lastRefreshTime = now
+
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "请先绑定另一半才能开启实时同步哦~", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -99,14 +89,37 @@ class MapFragment : Fragment() {
             forceSyncMyLocation()
         }
 
+        // 🟢 探测雷达 (30秒严厉冷却)
         btnLocateTa.setOnClickListener {
-            if (!isClickSafe()) return@setOnClickListener
-            if (UserPrefs.getPartnerId(requireContext()) <= 0) {
+            val partnerId = UserPrefs.getPartnerId(requireContext())
+            if (partnerId <= 0) {
                 Toast.makeText(context, "快去邀请你的另一半绑定吧！", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            Toast.makeText(context, "正在获取${getPartnerName()}的最新位置...", Toast.LENGTH_SHORT).show()
-            pullPartnerLocation(moveToTa = true)
+
+            val now = System.currentTimeMillis()
+            if (now - lastLocateTaTime < 30000) {
+                val remain = (30000 - (now - lastLocateTaTime)) / 1000
+                Toast.makeText(context, "探测雷达冷却中，请等待 ${remain} 秒", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            lastLocateTaTime = now
+
+            if (WebSocketManager.isConnected) {
+                Toast.makeText(context, "📡 已发射雷达波，正在唤醒对方后台...", Toast.LENGTH_SHORT).show()
+
+                // 1. 发射唤醒指令
+                WebSocketManager.sendMessage("send_to_partner", partnerId, "force_location")
+
+                // 2. 延迟 4.5 秒，等待对方基站定位完成并上传后，瞬间拉取结果！
+                view.postDelayed({
+                    if (isAdded) pullPartnerLocation(moveToTa = true)
+                }, 4500)
+
+            } else {
+                Toast.makeText(context, "网络通道未就绪，正在尝试普通拉取...", Toast.LENGTH_SHORT).show()
+                pullPartnerLocation(moveToTa = true)
+            }
         }
 
         return view
@@ -117,22 +130,14 @@ class MapFragment : Fragment() {
         return try { rawTime.substring(11, 16) } catch (e: Exception) { "刚刚" }
     }
 
-    private fun renderStyledLocation(
-        label: String,
-        address: String?,
-        time: String?,
-        isPartner: Boolean,
-        stayMsg: String? = null
-    ): android.text.Spanned {
+    private fun renderStyledLocation(label: String, address: String?, time: String?, isPartner: Boolean, stayMsg: String? = null): android.text.Spanned {
         val displayTime = formatTime(time)
         val addr = address ?: "位置获取中..."
         val colorMain = if (isPartner) "#FF5252" else "#2196F3"
         val boldStart = if (isPartner) "<b>" else ""
         val boldEnd = if (isPartner) "</b>" else ""
 
-        val stayHtml = if (!stayMsg.isNullOrEmpty()) {
-            "<br/><small><font color='#4CAF50'>☕ $stayMsg</font></small>"
-        } else ""
+        val stayHtml = if (!stayMsg.isNullOrEmpty()) "<br/><small><font color='#4CAF50'>☕ $stayMsg</font></small>" else ""
 
         val htmlSource = """
             $boldStart<font color='$colorMain'>$label</font><font color='$colorMain'>$addr</font>$boldEnd<br/>
@@ -142,8 +147,7 @@ class MapFragment : Fragment() {
         return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             Html.fromHtml(htmlSource, Html.FROM_HTML_MODE_LEGACY)
         } else {
-            @Suppress("DEPRECATION")
-            Html.fromHtml(htmlSource)
+            @Suppress("DEPRECATION") Html.fromHtml(htmlSource)
         }
     }
 
@@ -165,12 +169,8 @@ class MapFragment : Fragment() {
             if (location != null) {
                 if (location.errorCode == 0) {
                     val dbLog = LocationEntity(
-                        latitude = location.latitude,
-                        longitude = location.longitude,
-                        address = location.address ?: "未知地址",
-                        timestamp = System.currentTimeMillis(),
-                        locationType = location.locationType,
-                        accuracy = location.accuracy
+                        latitude = location.latitude, longitude = location.longitude, address = location.address ?: "未知地址",
+                        timestamp = System.currentTimeMillis(), locationType = location.locationType, accuracy = location.accuracy
                     )
                     lifecycleScope.launch(Dispatchers.IO) {
                         val db = AppDatabase.getDatabase(requireContext())
@@ -186,24 +186,17 @@ class MapFragment : Fragment() {
                     refreshMapMarkers()
                     aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(myPos!!, 16f))
 
-                    // 💖 核心修改点：只要定位成功，无论是真实的还是缓存的，都在界面下方显示出来
                     tvMyAddr.text = renderStyledLocation("我的位置：", addr, null, false)
 
-                    // 2. 洁癖判断：只有真实坐标 (1, 5, 6) 才上报服务器
                     if (location.locationType == 1 || location.locationType == 5 || location.locationType == 6) {
                         val uid = UserPrefs.getUserId(requireContext())
                         if (uid != -1 && UserPrefs.getPartnerId(requireContext()) > 0) {
                             val deviceId = Settings.Secure.getString(requireContext().contentResolver, Settings.Secure.ANDROID_ID)
-                            val battery = DeviceUtil.getBatteryLevel(requireContext())
-                            val (netType, wifiName) = DeviceUtil.getNetworkInfo(requireContext())
-                            val fgApp = DeviceUtil.getForegroundApp(requireContext())
-                            val micBusy = DeviceUtil.getMicBusyStatus(requireContext())
-                            val steps = DeviceUtil.getStepCount(requireContext())
-
                             NetworkClient.getApi(requireContext()).syncAll(
                                 action = "sync_all", userId = uid, deviceId = deviceId, lat = lat, lng = lng, address = addr,
-                                battery = battery, netType = netType, wifiName = wifiName,
-                                fgApp = fgApp, micBusy = micBusy, steps = steps, topApps = "[]"
+                                battery = DeviceUtil.getBatteryLevel(requireContext()), netType = DeviceUtil.getNetworkInfo(requireContext()).first,
+                                wifiName = DeviceUtil.getNetworkInfo(requireContext()).second, fgApp = DeviceUtil.getForegroundApp(requireContext()),
+                                micBusy = DeviceUtil.getMicBusyStatus(requireContext()), steps = DeviceUtil.getStepCount(requireContext()), topApps = "[]"
                             ).enqueue(object : Callback<UserResponse> {
                                 override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                                     if (response.isSuccessful && response.body()?.status == "success") {
@@ -218,17 +211,12 @@ class MapFragment : Fragment() {
                             })
                         }
                     } else {
-                        // 如果是缓存返回，界面会显示这个地址，但仅通过 Toast 提示不上传
                         Toast.makeText(context, "获取到缓存位置，未同步给${getPartnerName()}", Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     val errorLog = LocationEntity(
-                        latitude = 0.0,
-                        longitude = 0.0,
-                        address = "高德异常: ${location.errorInfo}",
-                        timestamp = System.currentTimeMillis(),
-                        locationType = -location.errorCode,
-                        accuracy = 0f
+                        latitude = 0.0, longitude = 0.0, address = "高德异常: ${location.errorInfo}",
+                        timestamp = System.currentTimeMillis(), locationType = -location.errorCode, accuracy = 0f
                     )
                     lifecycleScope.launch(Dispatchers.IO) {
                         val db = AppDatabase.getDatabase(requireContext())
@@ -253,10 +241,7 @@ class MapFragment : Fragment() {
             return
         }
 
-        NetworkClient.getApi(requireContext()).getStatus(
-            userId = uid,
-            partnerId = pid
-        ).enqueue(object : Callback<UserResponse> {
+        NetworkClient.getApi(requireContext()).getStatus(userId = uid, partnerId = pid).enqueue(object : Callback<UserResponse> {
             override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                 val res = response.body() ?: return
                 if (res.status == "success") {
@@ -298,7 +283,7 @@ class MapFragment : Fragment() {
 
                         if (moveToTa && partnerPos != null) {
                             aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(partnerPos!!, 16f))
-                            Toast.makeText(context, "已锁定${partnerName}的位置", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "📍 目标锁定：${taLoc.address}", Toast.LENGTH_SHORT).show()
                         }
                     } ?: run {
                         showPartnerNotSynced()
@@ -328,8 +313,7 @@ class MapFragment : Fragment() {
         tvPartnerAddr.text = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             Html.fromHtml(htmlSource, Html.FROM_HTML_MODE_LEGACY)
         } else {
-            @Suppress("DEPRECATION")
-            Html.fromHtml(htmlSource)
+            @Suppress("DEPRECATION") Html.fromHtml(htmlSource)
         }
     }
 
@@ -338,19 +322,13 @@ class MapFragment : Fragment() {
         tvPartnerAddr.text = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             Html.fromHtml(htmlSource, Html.FROM_HTML_MODE_LEGACY)
         } else {
-            @Suppress("DEPRECATION")
-            Html.fromHtml(htmlSource)
+            @Suppress("DEPRECATION") Html.fromHtml(htmlSource)
         }
         partnerPos = null
         refreshMapMarkers()
     }
 
-    override fun onResume() {
-        super.onResume()
-        mapView.onResume()
-        pullPartnerLocation(moveToTa = false)
-    }
-
+    override fun onResume() { super.onResume(); mapView.onResume(); pullPartnerLocation(moveToTa = false) }
     override fun onPause() { super.onPause(); mapView.onPause() }
     override fun onDestroy() { super.onDestroy(); mapView.onDestroy(); locationClient?.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); mapView.onSaveInstanceState(outState) }
