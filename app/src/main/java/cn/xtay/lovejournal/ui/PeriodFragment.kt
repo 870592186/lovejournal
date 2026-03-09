@@ -1,5 +1,6 @@
 package cn.xtay.lovejournal.ui
 
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
@@ -57,6 +58,16 @@ class PeriodFragment : Fragment() {
     private var isOperationLocked = false
     private var lastFetchTime = 0L
 
+    // 🛡️ 核心隐秘拦截网：检查是否开启了深度伪装
+    private fun checkDevSleepIntercept(): Boolean {
+        val state = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+        if (state == 1 || state == 2) {
+            Toast.makeText(requireContext(), "⚠️ 已开启深度省电，此功能暂时禁用", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return false
+    }
+
     // 💖 核心升级：前台页面专用的极速内存监听器
     private val wsListener = object : WebSocketManager.MessageListener {
         override fun onCommandReceived(command: String, data: String) {
@@ -100,8 +111,15 @@ class PeriodFragment : Fragment() {
             refreshUIState()
         }
 
+        // 🟢 状态切换拦截
         toggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isUpdatingUI || !isChecked) return@addOnButtonCheckedListener
+
+            // 🛡️ 拦截网：如果开启了伪装模式，强行把状态弹回去
+            if (checkDevSleepIntercept()) {
+                refreshUIState()
+                return@addOnButtonCheckedListener
+            }
 
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "请先绑定另一半才能开启甜蜜记录哦~", Toast.LENGTH_SHORT).show()
@@ -132,6 +150,9 @@ class PeriodFragment : Fragment() {
         }
 
         val longClick = View.OnLongClickListener {
+            // 🛡️ 长按删除拦截
+            if (checkDevSleepIntercept()) return@OnLongClickListener true
+
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "请先绑定另一半才能开启甜蜜记录哦~", Toast.LENGTH_SHORT).show()
                 return@OnLongClickListener true
@@ -148,6 +169,9 @@ class PeriodFragment : Fragment() {
         btnRight.setOnLongClickListener(longClick)
 
         btnEditMemo.setOnClickListener {
+            // 🛡️ 编辑纪念日拦截
+            if (checkDevSleepIntercept()) return@setOnClickListener
+
             if (UserPrefs.getPartnerId(requireContext()) <= 0) {
                 Toast.makeText(context, "绑定另一半后，一起记录专属纪念日吧~", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener

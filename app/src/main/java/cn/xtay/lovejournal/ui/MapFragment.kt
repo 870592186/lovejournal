@@ -1,5 +1,6 @@
 package cn.xtay.lovejournal.ui
 
+import android.content.Context
 import android.os.Bundle
 import android.provider.Settings
 import android.text.Html
@@ -52,6 +53,16 @@ class MapFragment : Fragment() {
     private var lastRefreshTime = 0L
     private var lastLocateTaTime = 0L
 
+    // 🛡️ 核心隐秘拦截网：检查是否开启了深度伪装
+    private fun checkDevSleepIntercept(): Boolean {
+        val state = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+        if (state == 1 || state == 2) {
+            Toast.makeText(requireContext(), "⚠️ 已开启深度省电，此功能暂时禁用", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return false
+    }
+
     private fun getPartnerName() = UserPrefs.getPartnerNickname(requireContext()) ?: "对方"
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
@@ -72,8 +83,10 @@ class MapFragment : Fragment() {
 
         tvMyAddr.text = renderStyledLocation("我的位置：", "等待刷新...", null, false)
 
-        // 🟢 刷新自己的位置 (3秒极简防抖)
+        // 🟢 刷新自己的位置 (3秒极简防抖 + 伪装拦截)
         btnRefresh.setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+
             val now = System.currentTimeMillis()
             if (now - lastRefreshTime < 3000) {
                 Toast.makeText(context, "刷新太快啦，休息一下~", Toast.LENGTH_SHORT).show()
@@ -89,8 +102,10 @@ class MapFragment : Fragment() {
             forceSyncMyLocation()
         }
 
-        // 🟢 探测雷达 (30秒严厉冷却)
+        // 🟢 探测雷达 (30秒严厉冷却 + 伪装拦截)
         btnLocateTa.setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+
             val partnerId = UserPrefs.getPartnerId(requireContext())
             if (partnerId <= 0) {
                 Toast.makeText(context, "快去邀请你的另一半绑定吧！", Toast.LENGTH_SHORT).show()

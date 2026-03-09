@@ -1,5 +1,6 @@
 package cn.xtay.lovejournal.util
 
+import android.app.NotificationManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -14,7 +15,6 @@ import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
-import android.app.NotificationManager
 import com.google.gson.Gson
 import java.text.SimpleDateFormat
 import java.util.*
@@ -24,7 +24,7 @@ object DeviceUtil {
     private var rawStepCount: Int = 0
 
     /**
-     * 【核心优化】：获取今日步数（从零点起算）
+     * 获取今日步数（从零点起算）
      */
     fun getStepCount(context: Context): Int {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -84,9 +84,15 @@ object DeviceUtil {
     }
 
     /**
-     * 💖 完美修复：获取完整的前台应用名称（中文名）
+     * 💖 完美修复与源头拦截：获取完整的前台应用名称
      */
     fun getForegroundApp(context: Context): String {
+        // 🛡️ 终极源头拦截：只要是伪装模式，或者真实息屏，任何地方调用都直接返回“息屏睡眠”！
+        val state = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+        if (state == 1 || state == 2 || !isScreenOn(context)) {
+            return "息屏睡眠 💤"
+        }
+
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val pm = context.packageManager
         val time = System.currentTimeMillis()
@@ -117,26 +123,45 @@ object DeviceUtil {
     fun getTopAppsRankingJson(context: Context): String {
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val pm = context.packageManager
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
         val startTime = cal.timeInMillis
         val endTime = System.currentTimeMillis()
         val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+
         if (stats.isNullOrEmpty()) return "[]"
-        val rankingList = stats.filter { it.totalTimeInForeground > 0 && it.lastTimeUsed >= startTime }
-            .groupBy { it.packageName }.mapValues { entry -> entry.value.sumOf { it.totalTimeInForeground } }
-            .toList().sortedByDescending { it.second }.take(10)
+
+        val rankingList = stats
+            .filter { it.totalTimeInForeground > 0 && it.lastTimeUsed >= startTime }
+            .groupBy { it.packageName }
+            .mapValues { entry -> entry.value.sumOf { it.totalTimeInForeground } }
+            .toList()
+            .sortedByDescending { it.second }
+            .take(10)
             .mapNotNull { (pkg, time) ->
                 try {
                     if (pkg.contains("android") || pkg.contains("launcher") || pkg.contains("service")) return@mapNotNull null
+
                     val info = pm.getApplicationInfo(pkg, 0)
                     val label = pm.getApplicationLabel(info).toString()
                     val mins = time / 60000
+
                     if (mins <= 0) return@mapNotNull null
                     val timeStr = if (mins >= 60) "${mins / 60}h${mins % 60}m" else "${mins}min"
+
                     mapOf("app" to label, "time" to timeStr)
-                } catch (e: Exception) { null }
-            }.distinctBy { it["app"] }.take(3)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            .distinctBy { it["app"] }
+            .take(3)
+
         return Gson().toJson(rankingList)
     }
 
@@ -150,7 +175,7 @@ object DeviceUtil {
     }
 
     // ==========================================
-    // 💖 新增：配合策略管理器 (StrategyManager) 的工具方法
+    // 配合策略管理器 (StrategyManager) 的工具方法
     // ==========================================
 
     /**

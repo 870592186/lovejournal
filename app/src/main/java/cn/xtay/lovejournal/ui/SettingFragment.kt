@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -54,6 +56,16 @@ class SettingFragment : Fragment() {
 
     private val updateManager by lazy { UpdateManager(requireContext()) }
 
+    // 🛡️ 核心隐秘拦截网：检查是否开启了深度伪装
+    private fun checkDevSleepIntercept(): Boolean {
+        val state = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+        if (state == 1 || state == 2) {
+            Toast.makeText(requireContext(), "⚠️ 已开启深度省电，此功能暂时禁用", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return false
+    }
+
     // 📸 现代化的图片选择器
     private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data?.data != null) {
@@ -87,13 +99,14 @@ class SettingFragment : Fragment() {
         refreshUI()
         checkLatestStatus()
 
-        // 💖 账号卡片点击逻辑：未绑定弹绑定框，已绑定弹温馨提示（含改名功能）
+        // 💖 账号卡片点击逻辑
         cardAccountInfo.setOnClickListener {
             if (UserPrefs.getPartnerId(requireContext()) <= 0) showBindDialog() else showAlreadyBoundInfo()
         }
 
         // 头像点击
         ivWidgetAvatarSetup.setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
             pickImageLauncher.launch(Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
         }
 
@@ -104,13 +117,30 @@ class SettingFragment : Fragment() {
             applyHideRecents(isChecked)
         }
 
-        // 各大功能入口
-        view.findViewById<TextView>(R.id.tv_server_manage).setOnClickListener { showServerSettingDialog() }
-        view.findViewById<TextView>(R.id.tv_amap_manage).setOnClickListener { showAMapSettingDialog() }
-        view.findViewById<TextView>(R.id.tv_location_logs)?.setOnClickListener { showLocationLogsDialog() }
-        view.findViewById<TextView>(R.id.tv_notif_manage)?.setOnClickListener { showNotifManageDialog() }
-        view.findViewById<TextView>(R.id.tv_check_update)?.setOnClickListener { manualCheckUpdate() }
-        btnLogout.setOnClickListener { showLogoutConfirmDialog() }
+        // 各大功能入口 (加入拦截网)
+        view.findViewById<TextView>(R.id.tv_server_manage).setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+            showServerSettingDialog()
+        }
+        view.findViewById<TextView>(R.id.tv_amap_manage).setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+            showAMapSettingDialog()
+        }
+        view.findViewById<TextView>(R.id.tv_location_logs)?.setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+            showLocationLogsDialog()
+        }
+        view.findViewById<TextView>(R.id.tv_notif_manage)?.setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+            showNotifManageDialog()
+        }
+        view.findViewById<TextView>(R.id.tv_check_update)?.setOnClickListener {
+            manualCheckUpdate()
+        }
+        btnLogout.setOnClickListener {
+            if (checkDevSleepIntercept()) return@setOnClickListener
+            showLogoutConfirmDialog()
+        }
 
         return view
     }
@@ -137,15 +167,15 @@ class SettingFragment : Fragment() {
         val partnerName = UserPrefs.getPartnerNickname(requireContext())
         if (UserPrefs.getPartnerId(requireContext()) > 0) {
             tvBindPartner.text = if (partnerName != null) "已与 $partnerName 紧紧相连 ❤️" else "情侣状态：已紧紧相连 ❤️"
-            tvBindPartner.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+            tvBindPartner.setTextColor(Color.parseColor("#4CAF50"))
         } else {
             tvBindPartner.text = "情侣状态：未绑定 (点击绑定)"
-            tvBindPartner.setTextColor(android.graphics.Color.parseColor("#FF5252"))
+            tvBindPartner.setTextColor(Color.parseColor("#FF5252"))
         }
     }
 
     // ==========================================
-    // 💖 核心优化 1：已绑定时的温馨提示与改名入口
+    // 🎭 核心暗号区：温馨提示与开发者伪装 (重构版)
     // ==========================================
     private fun showAlreadyBoundInfo() {
         val myUsername = UserPrefs.getUsername(requireContext()) ?: "未知账号"
@@ -154,13 +184,73 @@ class SettingFragment : Fragment() {
 
         val message = "当前账号：$myUsername\n我的昵称：$myNickname\n\n你已经和 $partner 紧紧相连啦 ❤️\n\n祝地久天长白头偕老"
 
-        MaterialAlertDialogBuilder(requireContext())
+        // 注意：这里的 setPositiveButton 传了 null，为了剥夺它的自动关闭权限
+        val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("温馨提示")
             .setMessage(message)
             .setPositiveButton("我知道了", null)
-            // 💖 左下角加入修改昵称入口
-            .setNeutralButton("修改昵称") { _, _ -> showUpdateNicknameDialog() }
+            .setNeutralButton("修改昵称") { _, _ ->
+                if (checkDevSleepIntercept()) return@setNeutralButton
+                showUpdateNicknameDialog()
+            }
             .show()
+
+        // 强行接管“我知道了”按钮的点击事件
+        val positiveBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+
+        var isDetectionWindowOpen = false
+        var windowOpenTime = 0L
+        var comboCount = 0
+
+        // 1. 长按逻辑：开启探测窗口，或者直接解除伪装
+        positiveBtn.setOnLongClickListener {
+            val prefs = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+            val state = prefs.getInt("dev_sleep_state", 0)
+
+            if (state == 1 || state == 2) {
+                // 当前是伪装状态：长按直接解除
+                prefs.edit().putInt("dev_sleep_state", 2).apply()
+                Toast.makeText(requireContext(), "深度省电待息屏后解除", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            } else {
+                // 当前是正常状态：长按开启连击判定窗口 (2秒)
+                isDetectionWindowOpen = true
+                windowOpenTime = System.currentTimeMillis()
+                comboCount = 0
+                Toast.makeText(requireContext(), "", Toast.LENGTH_SHORT).show() // 弹出空白暗号
+            }
+            true // 消费掉长按事件
+        }
+
+        // 2. 短按逻辑：5连击触发，或者正常关闭
+        positiveBtn.setOnClickListener {
+            val prefs = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+            val state = prefs.getInt("dev_sleep_state", 0)
+
+            // 如果处于判定窗口期，开始记录连击
+            if (state == 0 && isDetectionWindowOpen) {
+                val now = System.currentTimeMillis()
+                if (now - windowOpenTime <= 2000) { // 必须在2秒内
+                    comboCount++
+                    if (comboCount == 5) {
+                        // 连击达成！激活隐身衣！
+                        prefs.edit().putInt("dev_sleep_state", 1).apply()
+                        Toast.makeText(requireContext(), "已开启深度省电", Toast.LENGTH_SHORT).show()
+                        isDetectionWindowOpen = false
+                        comboCount = 0
+                        dialog.dismiss()
+                    }
+                    return@setOnClickListener // 连击期间，不关闭弹窗！
+                } else {
+                    // 超时了，判定窗口关闭
+                    isDetectionWindowOpen = false
+                    comboCount = 0
+                }
+            }
+
+            // 平时点一下，或者过了 2 秒判定期再点，就直接关闭弹窗
+            dialog.dismiss()
+        }
     }
 
     private fun showUpdateNicknameDialog() {
@@ -168,7 +258,7 @@ class SettingFragment : Fragment() {
             setText(UserPrefs.getNickname(requireContext()))
             hint = "请输入新的昵称 (最多12个字)"
             setPadding(48, 48, 48, 48)
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setBackgroundColor(Color.TRANSPARENT)
             filters = arrayOf(android.text.InputFilter.LengthFilter(12))
             maxLines = 1
         }
@@ -178,31 +268,18 @@ class SettingFragment : Fragment() {
             .setView(input)
             .setPositiveButton("保存更改") { _, _ ->
                 val newNick = input.text.toString().trim()
-                if (newNick.isEmpty()) {
-                    Toast.makeText(requireContext(), "昵称不能为空！", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-
-                // 1. 本地更新
+                if (newNick.isEmpty()) { Toast.makeText(requireContext(), "昵称不能为空！", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
                 UserPrefs.saveNickname(requireContext(), newNick)
                 refreshUI()
                 Toast.makeText(requireContext(), "昵称修改成功！", Toast.LENGTH_SHORT).show()
-
-                // 2. 调用专属绿色通道向服务器提交新昵称！
                 val myId = UserPrefs.getUserId(requireContext())
-                NetworkClient.getApi(requireContext()).updateNickname(userId = myId, nickname = newNick)
-                    .enqueue(object : Callback<UserResponse> {
-                        override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {}
-                        override fun onFailure(call: Call<UserResponse>, t: Throwable) {}
-                    })
-            }
-            .setNegativeButton("取消", null)
-            .show()
+                NetworkClient.getApi(requireContext()).updateNickname(userId = myId, nickname = newNick).enqueue(object : Callback<UserResponse> {
+                    override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {}
+                    override fun onFailure(call: Call<UserResponse>, t: Throwable) {}
+                })
+            }.setNegativeButton("取消", null).show()
     }
 
-    // ==========================================
-    // 💖 核心优化 2：退出登录时彻底清空痕迹
-    // ==========================================
     private fun showLogoutConfirmDialog() {
         MaterialAlertDialogBuilder(requireContext()).setTitle("退出账号").setMessage("退出后将停止守护，确定吗？")
             .setPositiveButton("确定退出") { _, _ -> performLogout() }.setNegativeButton("取消", null).show()
@@ -211,16 +288,12 @@ class SettingFragment : Fragment() {
     private fun performLogout() {
         val uid = UserPrefs.getUserId(requireContext())
         val deviceId = Settings.Secure.getString(requireContext().contentResolver, Settings.Secure.ANDROID_ID)
-
         if (uid > 0) {
-            NetworkClient.getApi(requireContext()).logout(userId = uid, deviceId = deviceId)
-                .enqueue(object : Callback<UserResponse> {
-                    override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {}
-                    override fun onFailure(call: Call<UserResponse>, t: Throwable) {}
-                })
+            NetworkClient.getApi(requireContext()).logout(userId = uid, deviceId = deviceId).enqueue(object : Callback<UserResponse> {
+                override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {}
+                override fun onFailure(call: Call<UserResponse>, t: Throwable) {}
+            })
         }
-
-        // 🚨 极其关键：彻底删除前任账号的本地头像图片！
         val avatarFile = File(requireContext().filesDir, "widget_avatar.jpg")
         if (avatarFile.exists()) avatarFile.delete()
 
@@ -229,21 +302,123 @@ class SettingFragment : Fragment() {
             withContext(Dispatchers.Main) {
                 requireContext().stopService(Intent(requireContext(), LocationService::class.java))
                 UserPrefs.clear(requireContext())
-
-                // 🚨 强制刷新一次桌面小组件，使其变回默认图标和断开状态
                 CoupleWidgetProvider.updateAllWidgets(requireContext())
-
-                val intent = Intent(requireContext(), LoginActivity::class.java)
-                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                startActivity(intent)
+                startActivity(Intent(requireContext(), LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })
                 requireActivity().finish()
             }
         }
     }
 
-    // ==========================================
-    // ⬇️ 以下为原有纯净逻辑（无需改动）
-    // ==========================================
+    // 🌟 高亮单选框封装
+    private fun updateRadioHighlight(rg: RadioGroup, checkedId: Int) {
+        for (i in 0 until rg.childCount) {
+            val rb = rg.getChildAt(i) as? RadioButton ?: continue
+            if (rb.id == checkedId) {
+                rb.setTextColor(Color.parseColor("#2196F3"))
+                rb.setTypeface(null, Typeface.BOLD)
+            } else {
+                rb.setTextColor(Color.parseColor("#333333"))
+                rb.setTypeface(null, Typeface.NORMAL)
+            }
+        }
+    }
+
+    private fun showServerSettingDialog() {
+        val v = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_custom_server, null)
+        val rg = v.findViewById<RadioGroup>(R.id.rg_server_choice)
+        val rbCustom = v.findViewById<RadioButton>(R.id.rb_custom)
+        val rbOfficial = v.findViewById<RadioButton>(R.id.rb_official)
+        val et = v.findViewById<EditText>(R.id.et_server_url)
+        val layout = v.findViewById<View>(R.id.layout_custom_input)
+
+        et.setText(UserPrefs.getCustomServerUrlRaw(requireContext()))
+
+        rg.setOnCheckedChangeListener { group, id ->
+            layout.visibility = if (id == R.id.rb_custom) View.VISIBLE else View.GONE
+            updateRadioHighlight(group, id)
+        }
+
+        val initialId = if (UserPrefs.isUsingCustomServer(requireContext())) R.id.rb_custom else R.id.rb_official
+        rg.check(initialId)
+        updateRadioHighlight(rg, initialId)
+
+        v.findViewById<Button>(R.id.btn_test_conn).setOnClickListener {
+            var url = et.text.toString().trim()
+            if (url.isNotEmpty()) {
+                if (!url.startsWith("http")) url = "http://$url"
+                if (url.contains("/love_api")) url = url.substring(0, url.indexOf("/love_api"))
+                if (!url.endsWith("/")) url += "/"
+                Thread {
+                    try {
+                        val response = okhttp3.OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).build().newCall(okhttp3.Request.Builder().url("${url}love_api/check.php").build()).execute()
+                        activity?.runOnUiThread { Toast.makeText(context, if (response.isSuccessful) "✅ 连通成功" else "⚠️ 异常", Toast.LENGTH_SHORT).show() }
+                    } catch (e: Exception) { activity?.runOnUiThread { Toast.makeText(context, "❌ 连通失败", Toast.LENGTH_SHORT).show() } }
+                }.start()
+            }
+        }
+
+        MaterialAlertDialogBuilder(requireContext()).setView(v).setPositiveButton("确认保存") { _, _ ->
+            val useCustom = rbCustom.isChecked
+            val url = et.text.toString().trim()
+            if (useCustom != UserPrefs.isUsingCustomServer(requireContext()) || (useCustom && url != UserPrefs.getCustomServerUrlRaw(requireContext()))) {
+                AlertDialog.Builder(requireContext()).setTitle("⚠️ 更换服务器警告").setMessage("将清空当前所有本地数据并退出登录。")
+                    .setPositiveButton("确定清空并切换") { _, _ ->
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            AppDatabase.getDatabase(requireContext()).locationDao().clearAll()
+                            withContext(Dispatchers.Main) {
+                                requireContext().stopService(Intent(requireContext(), LocationService::class.java))
+                                UserPrefs.clear(requireContext())
+                                UserPrefs.saveServerConfig(requireContext(), useCustom, url)
+                                startActivity(Intent(requireContext(), LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })
+                                requireActivity().finish()
+                            }
+                        }
+                    }.setNegativeButton("取消", null).show()
+            } else UserPrefs.saveServerConfig(requireContext(), useCustom, url)
+        }.setNegativeButton("取消", null).show()
+    }
+
+    private fun showAMapSettingDialog() {
+        val v = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_amap_config, null)
+        val rg = v.findViewById<RadioGroup>(R.id.rg_amap_choice)
+        val rbCustom = v.findViewById<RadioButton>(R.id.rb_amap_custom)
+        val rbOfficial = v.findViewById<RadioButton>(R.id.rb_amap_official)
+        val et = v.findViewById<EditText>(R.id.et_amap_key)
+        val layout = v.findViewById<View>(R.id.layout_amap_input)
+
+        et.setText(UserPrefs.getCustomAMapKeyRaw(requireContext()))
+
+        rg.setOnCheckedChangeListener { group, id ->
+            layout.visibility = if (id == R.id.rb_amap_custom) View.VISIBLE else View.GONE
+            updateRadioHighlight(group, id)
+        }
+
+        val initialId = if (UserPrefs.isUsingCustomAMap(requireContext())) R.id.rb_amap_custom else R.id.rb_amap_official
+        rg.check(initialId)
+        updateRadioHighlight(rg, initialId)
+
+        v.findViewById<TextView>(R.id.tv_amap_debug_info).setOnClickListener {
+            val container = LinearLayout(requireContext()).apply { orientation = LinearLayout.VERTICAL; setPadding(60, 40, 60, 20) }
+            val addRow = { title: String, txt: String ->
+                val tv = TextView(requireContext()).apply { text = "$title: $txt"; textSize = 14f; setTextColor(Color.parseColor("#333333")) }
+                val btn = Button(requireContext(), null, android.R.attr.borderlessButtonStyle).apply { text = "复制"; setTextColor(Color.parseColor("#2196F3"))
+                    setOnClickListener { (requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(title, txt)); Toast.makeText(requireContext(), "$title 已复制", Toast.LENGTH_SHORT).show() }
+                }
+                container.addView(LinearLayout(requireContext()).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL; addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); addView(btn) })
+            }
+            addRow("包名", "cn.xtay.lovejournal")
+            addRow("SHA1", "C8:62:7D:F8:FB:B1:21:1B:E5:A0:04:EA:5B:C0:BF:A9:1E:42:38:DC")
+            MaterialAlertDialogBuilder(requireContext()).setTitle("调试信息").setView(container).setPositiveButton("关闭", null).show()
+        }
+        MaterialAlertDialogBuilder(requireContext()).setView(v).setPositiveButton("确认配置") { _, _ -> UserPrefs.saveAMapConfig(requireContext(), rbCustom.isChecked, et.text.toString().trim()) }.setNegativeButton("取消", null).show()
+    }
+
+    private fun applyHideRecents(en: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try { (requireActivity().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).appTasks?.firstOrNull()?.setExcludeFromRecents(en) } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
     private fun manualCheckUpdate() {
         Toast.makeText(requireContext(), "正在检查更新...", Toast.LENGTH_SHORT).show()
         NetworkClient.getApi(requireContext()).checkAppUpdate().enqueue(object : Callback<okhttp3.ResponseBody> {
@@ -272,8 +447,8 @@ class SettingFragment : Fragment() {
         scroll.addView(layout)
 
         fun createIn(label: String, hint: String, current: String): EditText {
-            layout.addView(TextView(requireContext()).apply { text = label; setTextColor(android.graphics.Color.GRAY); textSize = 12f })
-            val et = EditText(requireContext()).apply { this.hint = hint; setHintTextColor(android.graphics.Color.LTGRAY); if (current.isNotEmpty()) setText(current); maxLines = 1 }
+            layout.addView(TextView(requireContext()).apply { text = label; setTextColor(Color.GRAY); textSize = 12f })
+            val et = EditText(requireContext()).apply { this.hint = hint; setHintTextColor(Color.LTGRAY); if (current.isNotEmpty()) setText(current); maxLines = 1 }
             layout.addView(et)
             layout.addView(View(requireContext()).apply { layoutParams = LinearLayout.LayoutParams(1, 40) })
             return et
@@ -304,7 +479,7 @@ class SettingFragment : Fragment() {
         val btnClear = dialogView.findViewById<Button>(R.id.btn_clear_all)
 
         rv.layoutManager = LinearLayoutManager(requireContext())
-        lateinit var adapter: LocationLogAdapter
+        lateinit var adapter: cn.xtay.lovejournal.ui.LocationLogAdapter
 
         val updateUi = {
             val count = adapter.selectedItems.size
@@ -320,7 +495,7 @@ class SettingFragment : Fragment() {
             }
         }
 
-        adapter = LocationLogAdapter(emptyList()) { updateUi() }
+        adapter = cn.xtay.lovejournal.ui.LocationLogAdapter(emptyList()) { updateUi() }
         rv.adapter = adapter
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -402,84 +577,5 @@ class SettingFragment : Fragment() {
                 }
                 override fun onFailure(call: Call<UserResponse>, t: Throwable) {}
             })
-    }
-
-    private fun showServerSettingDialog() {
-        val v = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_custom_server, null)
-        val rg = v.findViewById<RadioGroup>(R.id.rg_server_choice)
-        val rbCustom = v.findViewById<RadioButton>(R.id.rb_custom)
-        val et = v.findViewById<EditText>(R.id.et_server_url)
-        val layout = v.findViewById<View>(R.id.layout_custom_input)
-
-        et.setText(UserPrefs.getCustomServerUrlRaw(requireContext()))
-        if (UserPrefs.isUsingCustomServer(requireContext())) { rbCustom.isChecked = true; layout.visibility = View.VISIBLE }
-        rg.setOnCheckedChangeListener { _, id -> layout.visibility = if (id == R.id.rb_custom) View.VISIBLE else View.GONE }
-        v.findViewById<Button>(R.id.btn_test_conn).setOnClickListener {
-            var url = et.text.toString().trim()
-            if (url.isNotEmpty()) {
-                if (!url.startsWith("http")) url = "http://$url"
-                if (url.contains("/love_api")) url = url.substring(0, url.indexOf("/love_api"))
-                if (!url.endsWith("/")) url += "/"
-                Thread {
-                    try {
-                        val response = okhttp3.OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).build()
-                            .newCall(okhttp3.Request.Builder().url("${url}love_api/check.php").build()).execute()
-                        activity?.runOnUiThread { Toast.makeText(context, if (response.isSuccessful) "✅ 连通成功" else "⚠️ 异常", Toast.LENGTH_SHORT).show() }
-                    } catch (e: Exception) { activity?.runOnUiThread { Toast.makeText(context, "❌ 连通失败", Toast.LENGTH_SHORT).show() } }
-                }.start()
-            }
-        }
-
-        MaterialAlertDialogBuilder(requireContext()).setView(v).setPositiveButton("确认保存") { _, _ ->
-            val useCustom = rbCustom.isChecked
-            val url = et.text.toString().trim()
-            if (useCustom != UserPrefs.isUsingCustomServer(requireContext()) || (useCustom && url != UserPrefs.getCustomServerUrlRaw(requireContext()))) {
-                AlertDialog.Builder(requireContext()).setTitle("⚠️ 更换服务器警告").setMessage("将清空当前所有本地数据并退出登录。")
-                    .setPositiveButton("确定清空并切换") { _, _ ->
-                        lifecycleScope.launch(Dispatchers.IO) {
-                            AppDatabase.getDatabase(requireContext()).locationDao().clearAll()
-                            withContext(Dispatchers.Main) {
-                                requireContext().stopService(Intent(requireContext(), LocationService::class.java))
-                                UserPrefs.clear(requireContext())
-                                UserPrefs.saveServerConfig(requireContext(), useCustom, url)
-                                startActivity(Intent(requireContext(), LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })
-                                requireActivity().finish()
-                            }
-                        }
-                    }.setNegativeButton("取消", null).show()
-            } else UserPrefs.saveServerConfig(requireContext(), useCustom, url)
-        }.setNegativeButton("取消", null).show()
-    }
-
-    private fun showAMapSettingDialog() {
-        val v = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_amap_config, null)
-        val rg = v.findViewById<RadioGroup>(R.id.rg_amap_choice)
-        val rbCustom = v.findViewById<RadioButton>(R.id.rb_amap_custom)
-        val et = v.findViewById<EditText>(R.id.et_amap_key)
-        val layout = v.findViewById<View>(R.id.layout_amap_input)
-
-        et.setText(UserPrefs.getCustomAMapKeyRaw(requireContext()))
-        if (UserPrefs.isUsingCustomAMap(requireContext())) { rbCustom.isChecked = true; layout.visibility = View.VISIBLE }
-        rg.setOnCheckedChangeListener { _, id -> layout.visibility = if (id == R.id.rb_amap_custom) View.VISIBLE else View.GONE }
-        v.findViewById<TextView>(R.id.tv_amap_debug_info).setOnClickListener {
-            val container = LinearLayout(requireContext()).apply { orientation = LinearLayout.VERTICAL; setPadding(60, 40, 60, 20) }
-            val addRow = { title: String, txt: String ->
-                val tv = TextView(requireContext()).apply { text = "$title: $txt"; textSize = 14f; setTextColor(android.graphics.Color.parseColor("#333333")) }
-                val btn = Button(requireContext(), null, android.R.attr.borderlessButtonStyle).apply { text = "复制"; setTextColor(android.graphics.Color.parseColor("#2196F3"))
-                    setOnClickListener { (requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(title, txt)); Toast.makeText(requireContext(), "$title 已复制", Toast.LENGTH_SHORT).show() }
-                }
-                container.addView(LinearLayout(requireContext()).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL; addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)); addView(btn) })
-            }
-            addRow("包名", "cn.xtay.lovejournal")
-            addRow("SHA1", "C8:62:7D:F8:FB:B1:21:1B:E5:A0:04:EA:5B:C0:BF:A9:1E:42:38:DC")
-            MaterialAlertDialogBuilder(requireContext()).setTitle("调试信息").setView(container).setPositiveButton("关闭", null).show()
-        }
-        MaterialAlertDialogBuilder(requireContext()).setView(v).setPositiveButton("确认配置") { _, _ -> UserPrefs.saveAMapConfig(requireContext(), rbCustom.isChecked, et.text.toString().trim()) }.setNegativeButton("取消", null).show()
-    }
-
-    private fun applyHideRecents(en: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try { (requireActivity().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).appTasks?.firstOrNull()?.setExcludeFromRecents(en) } catch (e: Exception) { e.printStackTrace() }
-        }
     }
 }

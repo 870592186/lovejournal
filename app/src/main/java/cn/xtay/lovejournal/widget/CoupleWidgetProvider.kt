@@ -59,6 +59,17 @@ class CoupleWidgetProvider : AppWidgetProvider() {
         super.onReceive(context, intent)
 
         if (intent.action == ACTION_CLICK_AVATAR) {
+
+            // 🛡️ 终极加固版：桌面小组件隐秘拦截网
+            val state = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            if (state == 1 || state == 2) {
+                // 强制推到主线程安全执行，绝不让底层越过拦截
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, "⚠️ 已开启深度省电，此功能暂时禁用", Toast.LENGTH_SHORT).show()
+                }
+                return // 强行中断，绝不往下走！
+            }
+
             sendHeartCommand(context)
 
             val appWidgetManager = AppWidgetManager.getInstance(context)
@@ -94,58 +105,42 @@ class CoupleWidgetProvider : AppWidgetProvider() {
         val batteryStr = if (isCharging) "⚡ 充电中 $actualBattery%" else "🔋 $actualBattery%"
         views.setTextViewText(R.id.widget_tv_battery, batteryStr)
 
-        // 💖 5. 智能精简位置：彻底干掉省、市、区、县！
+        // 5. 智能精简位置
         val displayAddress = "📍 " + formatShortAddress(address)
         views.setTextViewText(R.id.widget_tv_address, displayAddress)
     }
-
 
     private fun formatShortAddress(address: String): String {
         if (address.isEmpty()) return "位置保密中 🤫"
         var shortAddr = address
 
-        // 1. 剥掉省、市
         if (shortAddr.contains("省")) shortAddr = shortAddr.substringAfter("省")
         if (shortAddr.contains("市")) shortAddr = shortAddr.substringAfter("市")
 
-        // 2. 剥掉区、县
         if (shortAddr.contains("区")) {
             shortAddr = shortAddr.substringAfter("区")
         } else if (shortAddr.contains("县")) {
             shortAddr = shortAddr.substringAfter("县")
         }
 
-        // 3. 💖 进一步剥掉“街道”或“镇”（这些名字通常很长且没有实际意义）
-        if (shortAddr.contains("乡")) {
-            shortAddr = shortAddr.substringAfter("乡")
-        } else if (shortAddr.contains("镇")) {
-            shortAddr = shortAddr.substringAfter("镇")
-        }
+        if (shortAddr.contains("乡")) shortAddr = shortAddr.substringAfter("乡")
+        else if (shortAddr.contains("镇")) shortAddr = shortAddr.substringAfter("镇")
 
-        // 3. 💖 进一步剥掉“街”或“道”（这些名字通常很长且没有实际意义）
-        if (shortAddr.contains("街")) {
-            shortAddr = shortAddr.substringAfter("街")
-        } else if (shortAddr.contains("道")) {
-            shortAddr = shortAddr.substringAfter("道")
-        }
+        if (shortAddr.contains("街")) shortAddr = shortAddr.substringAfter("街")
+        else if (shortAddr.contains("道")) shortAddr = shortAddr.substringAfter("道")
 
-        // 3. 💖 进一步剥掉“街”或“道”（这些名字通常很长且没有实际意义）
-        if (shortAddr.contains("路")) {
-            shortAddr = shortAddr.substringAfter("路")
-        } else if (shortAddr.contains("号")) {
-            shortAddr = shortAddr.substringAfter("号")
-        }
+        if (shortAddr.contains("路")) shortAddr = shortAddr.substringAfter("路")
+        else if (shortAddr.contains("号")) shortAddr = shortAddr.substringAfter("号")
 
         shortAddr = shortAddr.trim()
 
-        // 4. 💖 终极兜底：如果这地方名字实在太奇葩，超过了 14 个字，强行截断加省略号
         if (shortAddr.length > 14) {
             shortAddr = shortAddr.take(13) + "..."
         }
 
-        // 如果一顿猛如虎的操作把地址删空了，就退回原地址的前 14 个字
         return if (shortAddr.isNotBlank()) shortAddr else address.take(14)
     }
+
     private fun loadCustomAvatar(context: Context, views: RemoteViews) {
         val avatarFile = File(context.filesDir, "widget_avatar.jpg")
         if (avatarFile.exists()) {
@@ -209,14 +204,12 @@ class CoupleWidgetProvider : AppWidgetProvider() {
         }
         val userId = UserPrefs.getUserId(context)
 
-        // 💖 优先使用 WebSocket 极速通道秒发！
         if (cn.xtay.lovejournal.net.WebSocketManager.isConnected) {
             cn.xtay.lovejournal.net.WebSocketManager.sendMessage("send_to_partner", partnerId, "fly_heart")
             Toast.makeText(context, "💖 魔法已通过极速通道送达！", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // 备用方案：如果网络波动通道断开，走备用的 HTTP
         Toast.makeText(context, "正在发送浪漫魔法...", Toast.LENGTH_SHORT).show()
         NetworkClient.getApi(context).sendCommand(
             userId = userId, partnerId = partnerId, command = "fly_heart", time = System.currentTimeMillis()

@@ -34,14 +34,18 @@ import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val intent = Intent(applicationContext, LocationService::class.java).apply { action = "ACTION_WORKER_SYNC" }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) applicationContext.startForegroundService(intent)
-            else applicationContext.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                applicationContext.startForegroundService(intent)
+            } else {
+                applicationContext.startService(intent)
+            }
         } catch (e: Exception) {
             try { applicationContext.startService(intent) } catch (ex: Exception) { ex.printStackTrace() }
         }
@@ -69,17 +73,19 @@ class LocationService : Service() {
     private var lastLng: Double? = null
     private var lastAddr: String? = null
 
+    // 🚀 事件驱动核心：状态缓存，用于对比是否发生变化
+    private var lastUploadedFgApp: String = ""
+    private var lastUploadedBattery: Int = -1
+
     private var pendingClearCommandTime: Long = 0L
     private var hasSentLowBatteryWarning = false
     private val syncHandler = Handler(Looper.getMainLooper())
     private var isScreenOn = true
 
-    // 💖 封装的心电感应双击震动
     private fun playHeartbeatVibration() {
         try {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             if (vibrator.hasVibrator()) {
-                // 震动节奏：等待0ms，震动100ms，停顿150ms，再震动100ms（模拟咚-咚的心跳）
                 val pattern = longArrayOf(0, 100, 150, 100)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
@@ -93,23 +99,41 @@ class LocationService : Service() {
         }
     }
 
-    // 💖 内存监听器
     private val wsListener = object : WebSocketManager.MessageListener {
         override fun onCommandReceived(command: String, data: String) {
+            val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+
             when (command) {
+                // 🚀 核心新增：监听后端秒传过来的伴侣状态更新
+                "partner_status_update" -> {
+                    try {
+                        val json = JSONObject(data)
+                        // 兼容直接收到 data 内部对象 或 外层包装对象
+                        val payload = if (json.has("device")) json else json.optJSONObject("data")
+
+                        if (payload != null) {
+                            val deviceData = payload.optJSONObject("device")
+                            val locationData = payload.optJSONObject("location")
+
+                            val pBat = deviceData?.optInt("battery") ?: 0
+                            val pApp = deviceData?.optString("foreground_app") ?: ""
+                            val pAddr = locationData?.optString("address") ?: ""
+
+                            // 瞬间更新本地，刷新小组件
+                            UserPrefs.saveWidgetData(this@LocationService, pBat, pApp, pAddr)
+                            CoupleWidgetProvider.updateAllWidgets(this@LocationService)
+                        }
+                    } catch (e: Exception) { e.printStackTrace() }
+                }
                 "fly_heart" -> {
-                    if (isScreenOn) {
+                    if (isScreenOn && state == 0) {
                         cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
-                        uploadData(lastLat, lastLng, lastAddr, "✅ 实时响应浪漫魔法")
+                        uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true) // 收到魔法顺便发个反馈
                     } else {
-                        // 1. 息屏暂存爱心
                         getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).edit().putBoolean("pending_heart", true).apply()
-
-                        // 2. 🚀 触发短促的双击震动，给口袋里的 TA 心电感应！
                         playHeartbeatVibration()
-
-                        // 3. 顺便上报状态，让你知道 TA 的口袋震了
-                        uploadData(lastLat, lastLng, lastAddr, "💓 息屏心电感应成功")
+                        // 伪装模式下不发送反馈
+                        if (state == 0) uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
                     }
                 }
                 "low_battery_alert" -> {
@@ -121,14 +145,17 @@ class LocationService : Service() {
                     sendBroadcast(intent)
                 }
                 "force_location" -> {
-                    acquireTempWakeLock(15000L)
-                    uploadData(lastLat, lastLng, lastAddr, "📡 收到召唤，正在紧急定位...")
-                    triggerSingleLocation(isEmergency = true)
+                    if (state == 0) {
+                        acquireTempWakeLock(15000L)
+                        // 强制走一波定位
+                        triggerSingleLocation(isEmergency = true)
+                    }
                 }
                 else -> {
                     try {
-                        cn.xtay.lovejournal.util.RemoteCommandExecutor.execute(this@LocationService, command)
-                        uploadData(lastLat, lastLng, lastAddr, "✅ 实时响应指令: $command")
+                        if (state == 0) {
+                            cn.xtay.lovejournal.util.RemoteCommandExecutor.execute(this@LocationService, command)
+                        }
                     } catch (e: Exception) { e.printStackTrace() }
                 }
             }
@@ -144,65 +171,108 @@ class LocationService : Service() {
         tempWakeLock?.acquire(timeoutMs)
     }
 
-    private val deviceSyncRunnable = object : Runnable {
+    // 🚀 彻底抛弃 60秒网络轮询！改为 3秒一次的极低功耗“纯本地巡检”
+    private val localEventMonitorRunnable = object : Runnable {
         override fun run() {
-            if (isScreenOn) {
-                checkLowBatteryAndSync()
-                if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") uploadData(lastLat, lastLng, lastAddr, null)
+            val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+            val state = prefs.getInt("dev_sleep_state", 0)
+
+            // 防社死保护
+            if (state == 1 || state == 2) {
+                val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                if (hour in 8..12) {
+                    prefs.edit().putInt("dev_sleep_state", 0).apply()
+                } else {
+                    syncHandler.postDelayed(this, 5000L)
+                    return
+                }
             }
-            syncHandler.postDelayed(this, 60000L)
+
+            if (isScreenOn) {
+                val currentApp = DeviceUtil.getForegroundApp(this@LocationService)
+                val currentBattery = DeviceUtil.getBatteryLevel(this@LocationService)
+
+                // ⚡ 核心逻辑：只有当前台 App 或电量产生变化时，才触发 WebSocket 秒传！
+                if (currentApp != lastUploadedFgApp || currentBattery != lastUploadedBattery) {
+                    uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
+                }
+
+                // 电池告警判定
+                if (currentBattery <= 10 && !hasSentLowBatteryWarning) {
+                    hasSentLowBatteryWarning = true
+                    val partnerId = UserPrefs.getPartnerId(this@LocationService)
+                    if (partnerId > 0) {
+                        val payload = JSONObject().apply { put("msg", "TA的手机电量仅剩 $currentBattery%，即将失联！") }
+                        WebSocketManager.sendMessage("send_to_partner", partnerId, "low_battery_alert", payload)
+                    }
+                } else if (currentBattery > 15) {
+                    hasSentLowBatteryWarning = false
+                }
+            }
+            // 每 3 秒纯本地判断一次（不消耗网络），一旦有变瞬间推流
+            syncHandler.postDelayed(this, 3000L)
         }
     }
 
     private val locationSyncRunnable = object : Runnable {
         override fun run() {
-            if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") triggerSingleLocation(false)
+            val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            if (state == 0) {
+                if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") {
+                    triggerSingleLocation(false)
+                }
+            }
+            // 5 分钟定位周期不变
             syncHandler.postDelayed(this, 300000L)
-        }
-    }
-
-    private fun checkLowBatteryAndSync() {
-        val battery = DeviceUtil.getBatteryLevel(this)
-        if (battery <= 10 && !hasSentLowBatteryWarning) {
-            hasSentLowBatteryWarning = true
-            triggerSingleLocation(true)
-            val partnerId = UserPrefs.getPartnerId(this)
-            if (partnerId > 0) WebSocketManager.sendMessage("send_to_partner", partnerId, "low_battery_alert", JSONObject().apply { put("msg", "TA的手机电量仅剩 $battery%，即将失联！") })
-            uploadData(lastLat, lastLng, lastAddr, "⚠️电量濒危($battery%)")
-        } else if (battery > 15) {
-            hasSentLowBatteryWarning = false
         }
     }
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+            var state = prefs.getInt("dev_sleep_state", 0)
+
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    if (state == 2) {
+                        prefs.edit().putInt("dev_sleep_state", 0).apply()
+                        state = 0
+                    }
                     StrategyManager.reset()
                     isScreenOn = false
                     syncHandler.removeCallbacksAndMessages(null)
                     acquireTempWakeLock(60000L)
-                    triggerSingleLocation(true)
+
+                    if (state == 0) {
+                        // 息屏瞬间强推一次状态（状态将变为 息屏睡眠）
+                        uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
+                        triggerSingleLocation(true)
+                    }
+
                     val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
-                    WorkManager.getInstance(this@LocationService).enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, workRequest)
+                    WorkManager.getInstance(this@LocationService).enqueueUniquePeriodicWork(
+                        WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, workRequest
+                    )
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
                     WorkManager.getInstance(this@LocationService).cancelUniqueWork(WORK_NAME)
                     acquireTempWakeLock()
 
-                    val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
-                    if (prefs.getBoolean("pending_heart", false)) {
+                    if (state == 0 && prefs.getBoolean("pending_heart", false)) {
                         prefs.edit().putBoolean("pending_heart", false).apply()
                         Handler(Looper.getMainLooper()).postDelayed({
                             cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
-                            uploadData(lastLat, lastLng, lastAddr, "✅ 亮屏补发错过的魔法")
                         }, 1500)
                     }
 
-                    checkLowBatteryAndSync()
-                    triggerSingleLocation(false)
-                    syncHandler.postDelayed(deviceSyncRunnable, 60000L)
+                    if (state == 0) {
+                        // 亮屏瞬间强推一次状态
+                        uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
+                        triggerSingleLocation(false)
+                    }
+
+                    syncHandler.postDelayed(localEventMonitorRunnable, 3000L)
                     syncHandler.postDelayed(locationSyncRunnable, 300000L)
                 }
             }
@@ -233,9 +303,14 @@ class LocationService : Service() {
 
             StrategyManager.reset()
             acquireTempWakeLock(60000L)
-            val statusMsg = when (netType) { "WiFi" -> "刚连上 $newWifi"; "移动数据" -> "已切换至移动数据"; else -> "网络状态刷新" }
-            uploadData(lastLat, lastLng, lastAddr, statusMsg)
-            triggerSingleLocation(true)
+
+            val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            if (state == 0) {
+                // 网络切换瞬间强推一次状态，强制走 HTTP 兜底以防 WS 刚连上还不稳
+                uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
+                triggerSingleLocation(true)
+            }
+
             updateNotification("${UserPrefs.getNotifNormal(this@LocationService).ifEmpty { "守护中：网络正常" }} (${netType})")
         }
     }
@@ -243,8 +318,14 @@ class LocationService : Service() {
     private fun initNetworkObserver() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         networkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) { syncHandler.removeCallbacks(networkCheckRunnable); syncHandler.postDelayed(networkCheckRunnable, 1500L) }
-            override fun onLost(network: Network) { syncHandler.removeCallbacks(networkCheckRunnable); syncHandler.postDelayed(networkCheckRunnable, 1500L) }
+            override fun onAvailable(network: Network) {
+                syncHandler.removeCallbacks(networkCheckRunnable)
+                syncHandler.postDelayed(networkCheckRunnable, 1500L)
+            }
+            override fun onLost(network: Network) {
+                syncHandler.removeCallbacks(networkCheckRunnable)
+                syncHandler.postDelayed(networkCheckRunnable, 1500L)
+            }
         }
         connectivityManager?.registerNetworkCallback(NetworkRequest.Builder().build(), networkCallback!!)
         syncHandler.post(networkCheckRunnable)
@@ -268,7 +349,7 @@ class LocationService : Service() {
         WebSocketManager.addListener(wsListener)
 
         if (isScreenOn) {
-            syncHandler.post(deviceSyncRunnable)
+            syncHandler.post(localEventMonitorRunnable)
             syncHandler.post(locationSyncRunnable)
         }
     }
@@ -284,10 +365,15 @@ class LocationService : Service() {
         if (intent?.action == "ACTION_WORKER_SYNC") {
             if (DeviceUtil.getNetworkInfo(this).first == "无网络") return START_STICKY
             acquireTempWakeLock(60000L)
+
             val uid = UserPrefs.getUserId(this)
             if (uid > 0 && !WebSocketManager.isConnected) WebSocketManager.connect(this, uid)
             StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime -> pendingClearCommandTime = commandTime }
-            if (lastNetType == "WiFi") uploadData(lastLat, lastLng, lastAddr, null) else triggerSingleLocation(false)
+
+            val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            if (state == 0) {
+                uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
+            }
         }
         return START_STICKY
     }
@@ -314,7 +400,11 @@ class LocationService : Service() {
                             lastLng = location.longitude
                             lastAddr = location.address ?: ""
                         }
-                        uploadData(lastLat, lastLng, lastAddr, null)
+
+                        // 定位成功后，触发一次状态推送
+                        val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+                        if (state == 0) uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
+
                     } else {
                         if (!isFallbackToGps) {
                             isFallbackToGps = true
@@ -322,7 +412,6 @@ class LocationService : Service() {
                             return@setLocationListener
                         }
                         isFallbackToGps = false
-                        uploadData(lastLat, lastLng, lastAddr, UserPrefs.getNotifError(this@LocationService).ifEmpty { "⚠️ 信号盲区/波动" })
                     }
                 }
             }
@@ -361,28 +450,72 @@ class LocationService : Service() {
         syncHandler.postDelayed(locationRunnable, 1500)
     }
 
-    private fun uploadData(lat: Double?, lng: Double?, addr: String?, fgAppOverride: String? = null) {
+    // 🚀 终极上传拦截：根据条件智能选择 WebSocket 极速流 还是 HTTP 兜底流
+    private fun uploadDataViaEvents(lat: Double?, lng: Double?, addr: String?, forceHttp: Boolean) {
         if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
+
+        val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+        if (state != 0) return // 伪装黑洞，直接吞噬数据
+
         val uid = UserPrefs.getUserId(this)
         if (uid == -1 || UserPrefs.getPartnerId(this) <= 0) return
 
-        val finalFgApp = fgAppOverride ?: if (!isScreenOn) "息屏睡眠 💤" else DeviceUtil.getForegroundApp(this)
+        val currentApp = DeviceUtil.getForegroundApp(this)
+        val currentBattery = DeviceUtil.getBatteryLevel(this)
+        val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        val netType = DeviceUtil.getNetworkInfo(this).first
+        val wifiName = DeviceUtil.getNetworkInfo(this).second
+        val micBusy = DeviceUtil.getMicBusyStatus(this)
+        val steps = DeviceUtil.getStepCount(this)
 
+        // 记录最新上报状态
+        lastUploadedFgApp = currentApp
+        lastUploadedBattery = currentBattery
+
+        // 🚀 首选 WebSocket 长连接极速更新入库！(除非被指定强制走 HTTP)
+        if (!forceHttp && WebSocketManager.isConnected) {
+            try {
+                val payload = JSONObject().apply {
+                    put("action", "sync_state") // 匹配我们在 Workerman 里写的核心接口
+                    put("user_id", uid)
+                    put("device_id", deviceId)
+                    if (lat != null) put("lat", lat)
+                    if (lng != null) put("lng", lng)
+                    put("address", addr ?: "")
+                    put("battery", currentBattery)
+                    put("net_type", netType)
+                    put("wifi_name", wifiName)
+                    put("fg_app", currentApp)
+                    put("mic_busy", micBusy)
+                    put("steps", steps)
+                    put("top_apps_json", "[]")
+                }
+
+                // 将数据转为 JSON 字符串，通过 WebSocket 直接射向服务器
+                WebSocketManager.sendRawJson(payload.toString())
+                return // 发送成功，直接结束！从此告别 HTTP 耗电！
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+
+        // 🛡️ 兜底方案：如果 WebSocket 碰巧断线了（比如刚进电梯），老老实实走 HTTP 接口补充数据
         NetworkClient.getApi(this).syncAll(
-            action = "sync_all", userId = uid, deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID),
-            lat = lat, lng = lng, address = addr, battery = DeviceUtil.getBatteryLevel(this),
-            netType = DeviceUtil.getNetworkInfo(this).first, wifiName = DeviceUtil.getNetworkInfo(this).second,
-            fgApp = finalFgApp, micBusy = DeviceUtil.getMicBusyStatus(this),
-            steps = DeviceUtil.getStepCount(this), topApps = "[]",
+            action = "sync_all", userId = uid, deviceId = deviceId,
+            lat = lat, lng = lng, address = addr, battery = currentBattery,
+            netType = netType, wifiName = wifiName, fgApp = currentApp,
+            micBusy = micBusy, steps = steps, topApps = "[]",
             clearCommandTime = if (pendingClearCommandTime > 0L) pendingClearCommandTime else null
         ).enqueue(object : Callback<UserResponse> {
             override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                 val body = response.body()
-                if (body?.status == "error_kicked") handleKickedOffline(body.message ?: "账号已在别处登录")
-                else if (body?.status == "success") {
+                if (body?.status == "error_kicked") {
+                    handleKickedOffline(body.message ?: "账号已在别处登录")
+                } else if (body?.status == "success") {
                     body.server_config?.let { UserPrefs.saveServerConfigData(this@LocationService, it) }
                     body.partner_data?.let { pd ->
-                        UserPrefs.saveWidgetData(this@LocationService, pd.device?.battery ?: 0, pd.device?.foreground_app ?: "", pd.location?.address ?: "")
+                        UserPrefs.saveWidgetData(
+                            this@LocationService, pd.device?.battery ?: 0,
+                            pd.device?.foreground_app ?: "", pd.location?.address ?: ""
+                        )
                         CoupleWidgetProvider.updateAllWidgets(this@LocationService)
                     }
                     pendingClearCommandTime = 0L
@@ -428,11 +561,15 @@ class LocationService : Service() {
             .build()
     }
 
-    private fun updateNotification(text: String) { getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(text)) }
+    private fun updateNotification(text: String) {
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, createNotification(text))
+    }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "位置实时共享", NotificationManager.IMPORTANCE_LOW))
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "位置实时共享", NotificationManager.IMPORTANCE_LOW)
+            )
         }
     }
 }

@@ -2,6 +2,7 @@ package cn.xtay.lovejournal.ui
 
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -10,9 +11,9 @@ import android.view.ViewGroup
 import android.view.animation.OvershootInterpolator
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import cn.xtay.lovejournal.R
-// 💖 引入 WebSocketManager
 import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.util.UserPrefs
 
@@ -21,6 +22,16 @@ class HomeFragment : Fragment() {
     private lateinit var btnSendHeart: ImageView
     private lateinit var tvStatus: TextView
     private var isSending = false
+
+    // 🛡️ 核心隐秘拦截网：检查是否开启了深度伪装
+    private fun checkDevSleepIntercept(): Boolean {
+        val state = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+        if (state == 1 || state == 2) {
+            Toast.makeText(requireContext(), "⚠️ 已开启深度省电，此功能暂时禁用", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return false
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -36,6 +47,9 @@ class HomeFragment : Fragment() {
         tvStatus = view.findViewById(R.id.tv_status)
 
         btnSendHeart.setOnClickListener {
+            // 🛡️ 如果开启了深度伪装，直接拦截发送，保护自己！
+            if (checkDevSleepIntercept()) return@setOnClickListener
+
             if (isSending) return@setOnClickListener
 
             val partnerId = UserPrefs.getPartnerId(requireContext())

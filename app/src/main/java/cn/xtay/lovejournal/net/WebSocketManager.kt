@@ -117,4 +117,10 @@ object WebSocketManager {
         currentUserId = -1
         reconnectHandler.removeCallbacksAndMessages(null)
     }
+
+    // 🚀 新增：专门用于长连接高速推送状态的底层后门
+    fun sendRawJson(jsonString: String) {
+        webSocket?.send(jsonString)
+    }
+
 }
