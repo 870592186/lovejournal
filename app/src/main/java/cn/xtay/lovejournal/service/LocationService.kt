@@ -73,7 +73,6 @@ class LocationService : Service() {
     private var lastLng: Double? = null
     private var lastAddr: String? = null
 
-    // 🚀 事件驱动核心：状态缓存，用于对比是否发生变化
     private var lastUploadedFgApp: String = ""
     private var lastUploadedBattery: Int = -1
 
@@ -104,11 +103,9 @@ class LocationService : Service() {
             val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
 
             when (command) {
-                // 🚀 核心新增：监听后端秒传过来的伴侣状态更新
                 "partner_status_update" -> {
                     try {
                         val json = JSONObject(data)
-                        // 兼容直接收到 data 内部对象 或 外层包装对象
                         val payload = if (json.has("device")) json else json.optJSONObject("data")
 
                         if (payload != null) {
@@ -119,7 +116,6 @@ class LocationService : Service() {
                             val pApp = deviceData?.optString("foreground_app") ?: ""
                             val pAddr = locationData?.optString("address") ?: ""
 
-                            // 瞬间更新本地，刷新小组件
                             UserPrefs.saveWidgetData(this@LocationService, pBat, pApp, pAddr)
                             CoupleWidgetProvider.updateAllWidgets(this@LocationService)
                         }
@@ -128,11 +124,10 @@ class LocationService : Service() {
                 "fly_heart" -> {
                     if (isScreenOn && state == 0) {
                         cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
-                        uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true) // 收到魔法顺便发个反馈
+                        uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
                     } else {
                         getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).edit().putBoolean("pending_heart", true).apply()
                         playHeartbeatVibration()
-                        // 伪装模式下不发送反馈
                         if (state == 0) uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
                     }
                 }
@@ -147,7 +142,6 @@ class LocationService : Service() {
                 "force_location" -> {
                     if (state == 0) {
                         acquireTempWakeLock(15000L)
-                        // 强制走一波定位
                         triggerSingleLocation(isEmergency = true)
                     }
                 }
@@ -171,13 +165,11 @@ class LocationService : Service() {
         tempWakeLock?.acquire(timeoutMs)
     }
 
-    // 🚀 彻底抛弃 60秒网络轮询！改为 3秒一次的极低功耗“纯本地巡检”
     private val localEventMonitorRunnable = object : Runnable {
         override fun run() {
             val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
             val state = prefs.getInt("dev_sleep_state", 0)
 
-            // 防社死保护
             if (state == 1 || state == 2) {
                 val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
                 if (hour in 8..12) {
@@ -192,12 +184,10 @@ class LocationService : Service() {
                 val currentApp = DeviceUtil.getForegroundApp(this@LocationService)
                 val currentBattery = DeviceUtil.getBatteryLevel(this@LocationService)
 
-                // ⚡ 核心逻辑：只有当前台 App 或电量产生变化时，才触发 WebSocket 秒传！
                 if (currentApp != lastUploadedFgApp || currentBattery != lastUploadedBattery) {
                     uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
                 }
 
-                // 电池告警判定
                 if (currentBattery <= 10 && !hasSentLowBatteryWarning) {
                     hasSentLowBatteryWarning = true
                     val partnerId = UserPrefs.getPartnerId(this@LocationService)
@@ -209,7 +199,6 @@ class LocationService : Service() {
                     hasSentLowBatteryWarning = false
                 }
             }
-            // 每 3 秒纯本地判断一次（不消耗网络），一旦有变瞬间推流
             syncHandler.postDelayed(this, 3000L)
         }
     }
@@ -218,11 +207,13 @@ class LocationService : Service() {
         override fun run() {
             val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
             if (state == 0) {
-                if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") {
-                    triggerSingleLocation(false)
+                val netInfo = DeviceUtil.getNetworkInfo(this@LocationService)
+                if (netInfo.first != "无网络") {
+                    if (netInfo.first != "WiFi") {
+                        triggerSingleLocation(false)
+                    }
                 }
             }
-            // 5 分钟定位周期不变
             syncHandler.postDelayed(this, 300000L)
         }
     }
@@ -244,9 +235,11 @@ class LocationService : Service() {
                     acquireTempWakeLock(60000L)
 
                     if (state == 0) {
-                        // 息屏瞬间强推一次状态（状态将变为 息屏睡眠）
                         uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
-                        triggerSingleLocation(true)
+                        val netInfo = DeviceUtil.getNetworkInfo(this@LocationService)
+                        if (netInfo.first != "WiFi") {
+                            triggerSingleLocation(true)
+                        }
                     }
 
                     val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
@@ -267,9 +260,11 @@ class LocationService : Service() {
                     }
 
                     if (state == 0) {
-                        // 亮屏瞬间强推一次状态
                         uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
-                        triggerSingleLocation(false)
+                        val netInfo = DeviceUtil.getNetworkInfo(this@LocationService)
+                        if (netInfo.first != "WiFi") {
+                            triggerSingleLocation(false)
+                        }
                     }
 
                     syncHandler.postDelayed(localEventMonitorRunnable, 3000L)
@@ -298,17 +293,21 @@ class LocationService : Service() {
                 return@Runnable
             }
 
-            val uid = UserPrefs.getUserId(this@LocationService)
-            if (uid > 0 && !WebSocketManager.isConnected) WebSocketManager.connect(this@LocationService, uid)
-
             StrategyManager.reset()
             acquireTempWakeLock(60000L)
 
             val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
             if (state == 0) {
-                // 网络切换瞬间强推一次状态，强制走 HTTP 兜底以防 WS 刚连上还不稳
-                uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
-                triggerSingleLocation(true)
+                // 💡 核心优化：网络刚连上时，底层 IP 分配和 DNS 解析通常需要 1~2 秒。
+                // 我们强制挂起 3 秒，等网络绝对稳定后，再去建连 WebSocket 并强制拉起一次定锚定位！
+                syncHandler.postDelayed({
+                    val uid = UserPrefs.getUserId(this@LocationService)
+                    if (uid > 0 && !WebSocketManager.isConnected) {
+                        WebSocketManager.connect(this@LocationService, uid)
+                    }
+                    // 强制拉起一次定位。定位成功后，系统会自动调用 uploadDataViaEvents 上报新锚点和网络状态。
+                    triggerSingleLocation(true)
+                }, 3000L)
             }
 
             updateNotification("${UserPrefs.getNotifNormal(this@LocationService).ifEmpty { "守护中：网络正常" }} (${netType})")
@@ -372,7 +371,12 @@ class LocationService : Service() {
 
             val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
             if (state == 0) {
-                uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = true)
+                val netInfo = DeviceUtil.getNetworkInfo(this)
+                if (netInfo.first == "WiFi") {
+                    uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = false)
+                } else {
+                    triggerSingleLocation(false)
+                }
             }
         }
         return START_STICKY
@@ -401,10 +405,11 @@ class LocationService : Service() {
                             lastAddr = location.address ?: ""
                         }
 
-                        // 定位成功后，触发一次状态推送
                         val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
-                        if (state == 0) uploadDataViaEvents(lastLat, lastLng, lastAddr, false)
-
+                        if (state == 0) {
+                            // 定位成功后，顺带把设备最新状态一起推给服务器（形成定锚同步）
+                            uploadDataViaEvents(lastLat, lastLng, lastAddr, forceHttp = false)
+                        }
                     } else {
                         if (!isFallbackToGps) {
                             isFallbackToGps = true
@@ -450,12 +455,11 @@ class LocationService : Service() {
         syncHandler.postDelayed(locationRunnable, 1500)
     }
 
-    // 🚀 终极上传拦截：根据条件智能选择 WebSocket 极速流 还是 HTTP 兜底流
     private fun uploadDataViaEvents(lat: Double?, lng: Double?, addr: String?, forceHttp: Boolean) {
         if (DeviceUtil.getNetworkInfo(this).first == "无网络") return
 
         val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
-        if (state != 0) return // 伪装黑洞，直接吞噬数据
+        if (state != 0) return
 
         val uid = UserPrefs.getUserId(this)
         if (uid == -1 || UserPrefs.getPartnerId(this) <= 0) return
@@ -468,15 +472,13 @@ class LocationService : Service() {
         val micBusy = DeviceUtil.getMicBusyStatus(this)
         val steps = DeviceUtil.getStepCount(this)
 
-        // 记录最新上报状态
         lastUploadedFgApp = currentApp
         lastUploadedBattery = currentBattery
 
-        // 🚀 首选 WebSocket 长连接极速更新入库！(除非被指定强制走 HTTP)
         if (!forceHttp && WebSocketManager.isConnected) {
             try {
                 val payload = JSONObject().apply {
-                    put("action", "sync_state") // 匹配我们在 Workerman 里写的核心接口
+                    put("action", "sync_state")
                     put("user_id", uid)
                     put("device_id", deviceId)
                     if (lat != null) put("lat", lat)
@@ -491,13 +493,11 @@ class LocationService : Service() {
                     put("top_apps_json", "[]")
                 }
 
-                // 将数据转为 JSON 字符串，通过 WebSocket 直接射向服务器
                 WebSocketManager.sendRawJson(payload.toString())
-                return // 发送成功，直接结束！从此告别 HTTP 耗电！
+                return
             } catch (e: Exception) { e.printStackTrace() }
         }
 
-        // 🛡️ 兜底方案：如果 WebSocket 碰巧断线了（比如刚进电梯），老老实实走 HTTP 接口补充数据
         NetworkClient.getApi(this).syncAll(
             action = "sync_all", userId = uid, deviceId = deviceId,
             lat = lat, lng = lng, address = addr, battery = currentBattery,
