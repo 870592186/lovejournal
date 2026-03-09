@@ -81,6 +81,7 @@ class LocationService : Service() {
     private var isScreenOn = true
 
     // 💖 核心升级：极简的内存监听器，加入“息屏暂存”逻辑！
+    // 💖 核心升级：极简的内存监听器，加入“万能指令拦截”逻辑！
     private val wsListener = object : WebSocketManager.MessageListener {
         override fun onCommandReceived(command: String, data: String) {
             if (command == "fly_heart") {
@@ -97,6 +98,21 @@ class LocationService : Service() {
                 val msg = if (data.contains("msg")) JSONObject(data).optString("msg") else "TA的手机电量严重不足！"
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(this@LocationService, "🚨 紧急通知：$msg", Toast.LENGTH_LONG).show()
+                }
+            } else if (command == "sync_period") {
+                // 姨妈助手属于前台页面内的刷新，用指定包名的广播通知它是最安全的
+                val intent = Intent("cn.xtay.lovejournal.WS_COMMAND")
+                intent.setPackage(packageName)
+                intent.putExtra("command", "sync_period")
+                sendBroadcast(intent)
+            } else {
+                // 🚀 终极杀招：把其他所有你自定义的指令（锁屏、响铃等），全部交给原生的万能执行器！
+                try {
+                    cn.xtay.lovejournal.util.RemoteCommandExecutor.execute(this@LocationService, command)
+                    // 执行完顺便上报一下状态
+                    uploadData(lastLat, lastLng, lastAddr, "✅ 实时响应指令: $command")
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
         }
