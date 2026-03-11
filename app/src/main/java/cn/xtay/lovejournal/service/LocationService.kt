@@ -70,6 +70,9 @@ class LocationService : Service() {
     private var lastLng: Double? = null
     private var lastAddr: String? = null
 
+    // 🚀 新增：记录最后一次真实定位成功的时间戳，用于亮屏 5 分钟判断
+    private var lastLocationTime: Long = 0L
+
     private var pendingClearCommandTime: Long = 0L
     private var hasSentLowBatteryWarning = false
     private val syncHandler = Handler(Looper.getMainLooper())
@@ -318,11 +321,11 @@ class LocationService : Service() {
                     syncHandler.removeCallbacks(fastStateMonitorRunnable)
                     acquireTempWakeLock(60000L)
 
+                    // 🚀 优化：息屏瞬间绝对不再唤起定位，统一只用缓存坐标同步状态！
                     if (netType == "WiFi") {
                         uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤")
                     } else {
                         uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤")
-                        if (state == 0) triggerSingleLocation(true)
                     }
 
                     val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
@@ -336,11 +339,15 @@ class LocationService : Service() {
                     if (state == 0) {
                         releasePendingCommands()
                         checkLowBatteryAndSync()
+
+                        // 🚀 优化：亮屏瞬间使用缓存直接同步。如果非WiFi，且距离上次真实定位超过 5 分钟，才拉起高德！
                         if (netType == "WiFi") {
                             uploadData(lastLat, lastLng, lastAddr, null)
                         } else {
                             uploadData(lastLat, lastLng, lastAddr, null)
-                            triggerSingleLocation(false)
+                            if (System.currentTimeMillis() - lastLocationTime > 5 * 60 * 1000L) {
+                                triggerSingleLocation(false)
+                            }
                         }
                     } else {
                         uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤")
@@ -510,6 +517,8 @@ class LocationService : Service() {
                             lastLat = location.latitude
                             lastLng = location.longitude
                             lastAddr = location.address ?: ""
+                            // 🚀 记录最后一次真实获取有效位置的时间
+                            lastLocationTime = System.currentTimeMillis()
                         }
 
                         val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
@@ -600,7 +609,6 @@ class LocationService : Service() {
 
         val finalFgApp = fgAppOverride ?: DeviceUtil.getForegroundApp(this)
 
-        // 🚀 核心修复：只要调用 HTTP 的地方，同步射一发长连接 JSON 包，瞬间踢醒对方小组件！
         if (WebSocketManager.isConnected) {
             try {
                 val payload = JSONObject().apply {

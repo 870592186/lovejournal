@@ -77,7 +77,7 @@
                 android:layout_height="wrap_content"
                 android:lineSpacingExtra="4dp"
                 android:text="对方位置：尚未获取"
-                android:textAppearance="?attr/textAppearanceTitleMedium" />
+                android:textAppearance="?attr/textAppearanceBodyMedium" />
 
             <View
                 android:layout_width="match_parent"
