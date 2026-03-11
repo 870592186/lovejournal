@@ -1,6 +1,7 @@
 package cn.xtay.lovejournal.util
 
 import android.app.NotificationManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -23,9 +24,6 @@ object DeviceUtil {
 
     private var rawStepCount: Int = 0
 
-    /**
-     * 获取今日步数（从零点起算）
-     */
     fun getStepCount(context: Context): Int {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
@@ -75,7 +73,7 @@ object DeviceUtil {
         return when {
             actNw.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> {
                 val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                val ssid = wm.connectionInfo.ssid.replace("\"", "")
+                val ssid = wm.connectionInfo.ssid?.replace("\"", "") ?: "已连接"
                 "WiFi" to if (ssid == "<unknown ssid>") "已连接" else ssid
             }
             actNw.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "移动数据" to "运营商网络"
@@ -84,10 +82,10 @@ object DeviceUtil {
     }
 
     /**
-     * 💖 完美修复与源头拦截：获取完整的前台应用名称
+     * 🚀 纯净版实时前台探测：彻底摒弃 ActivityManager 陷阱，全靠物理事件流
      */
     fun getForegroundApp(context: Context): String {
-        // 🛡️ 终极源头拦截：只要是伪装模式，或者真实息屏，任何地方调用都直接返回“息屏睡眠”！
+        // 1. 息屏/伪装拦截
         val state = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
         if (state == 1 || state == 2 || !isScreenOn(context)) {
             return "息屏睡眠 💤"
@@ -95,29 +93,49 @@ object DeviceUtil {
 
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val pm = context.packageManager
-        val time = System.currentTimeMillis()
-        val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 60, time)
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - 1000 * 60 * 5 // 5分钟大窗口
 
-        if (!stats.isNullOrEmpty()) {
-            val pkg = stats.maxByOrNull { it.lastTimeUsed }?.packageName ?: return "桌面"
+        var lastResumedPkg = ""
 
-            // 将包名翻译为桌面显示的应用名
-            return try {
-                val info = pm.getApplicationInfo(pkg, 0)
-                val label = pm.getApplicationLabel(info).toString()
-
-                // 过滤一些常见的系统组件名，统一显示为桌面
-                if (pkg.contains("launcher") || pkg.contains("trebuchet") || label.contains("桌面")) {
-                    "桌面"
-                } else {
-                    label
+        // 2. 核心探测：遍历真实发生的物理事件流
+        try {
+            val events = usm.queryEvents(startTime, endTime)
+            val event = UsageEvents.Event()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                    lastResumedPkg = event.packageName
                 }
-            } catch (e: Exception) {
-                // 如果解析失败（如系统组件），则返回包名的最后一段作为备选
-                pkg.split(".").last()
+            }
+        } catch (e: Exception) {}
+
+        // 3. 兜底探测：如果在深度省电模式下事件流被吞，用统计保底
+        if (lastResumedPkg.isEmpty()) {
+            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+            if (!stats.isNullOrEmpty()) {
+                lastResumedPkg = stats.maxByOrNull { it.lastTimeUsed }?.packageName ?: ""
             }
         }
-        return "桌面"
+
+        // 4. 判断是不是桌面
+        if (lastResumedPkg.isEmpty() || lastResumedPkg.contains("launcher") || lastResumedPkg.contains("trebuchet") || lastResumedPkg == "android") {
+            return "桌面"
+        }
+
+        // 5. 判断是不是情侣手记本身
+        if (lastResumedPkg == context.packageName) {
+            return "情侣手记"
+        }
+
+        // 6. 翻译其他应用的名字
+        return try {
+            val info = pm.getApplicationInfo(lastResumedPkg, 0)
+            val label = pm.getApplicationLabel(info).toString()
+            if (label.contains("桌面")) "桌面" else label
+        } catch (e: Exception) {
+            lastResumedPkg.split(".").last()
+        }
     }
 
     fun getTopAppsRankingJson(context: Context): String {
@@ -174,21 +192,11 @@ object DeviceUtil {
         return if (isComm || isRecording) 1 else 0
     }
 
-    // ==========================================
-    // 配合策略管理器 (StrategyManager) 的工具方法
-    // ==========================================
-
-    /**
-     * 判断当前屏幕是否亮起
-     */
     fun isScreenOn(context: Context): Boolean {
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         return powerManager.isInteractive
     }
 
-    /**
-     * 判断系统是否处于“免打扰(Do Not Disturb)”模式
-     */
     fun isDndModeOn(context: Context): Boolean {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

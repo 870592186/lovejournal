@@ -8,6 +8,7 @@ import cn.xtay.lovejournal.util.UserPrefs
 import okhttp3.*
 import org.json.JSONObject
 import java.net.URL
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 object WebSocketManager {
@@ -22,7 +23,9 @@ object WebSocketManager {
     interface MessageListener {
         fun onCommandReceived(command: String, data: String)
     }
-    private val listeners = mutableListOf<MessageListener>()
+
+    // 🚀 优化：使用 CopyOnWriteArrayList 保证多线程注册/注销监听器时的绝对安全
+    private val listeners = CopyOnWriteArrayList<MessageListener>()
 
     fun addListener(listener: MessageListener) {
         if (!listeners.contains(listener)) listeners.add(listener)
@@ -72,11 +75,14 @@ object WebSocketManager {
                     val json = JSONObject(text)
                     if (json.optString("action") == "receive_from_partner") {
                         val command = json.optString("command")
-                        val dataString = json.optJSONObject("data")?.toString() ?: ""
+
+                        // 🚀 优化：兼容强解。不论 data 是 JSONObject 还是普通 String，都能安全提取
+                        val dataObj = json.opt("data")
+                        val dataString = dataObj?.toString() ?: ""
 
                         // 💖 通知所有正在监听的页面或服务
                         Handler(Looper.getMainLooper()).post {
-                            listeners.toList().forEach { it.onCommandReceived(command, dataString) }
+                            listeners.forEach { it.onCommandReceived(command, dataString) }
                         }
                     }
                 } catch (e: Exception) { e.printStackTrace() }
@@ -90,15 +96,30 @@ object WebSocketManager {
         })
     }
 
+    // 原有的发送格式化消息方法
     fun sendMessage(action: String, targetId: Int, command: String = "", data: JSONObject? = null) {
         if (!isConnected) return
-        val json = JSONObject().apply {
-            put("action", action)
-            put("target_id", targetId)
-            put("command", command)
-            if (data != null) put("data", data)
+        try {
+            val json = JSONObject().apply {
+                put("action", action)
+                put("target_id", targetId)
+                put("command", command)
+                if (data != null) put("data", data)
+            }
+            webSocket?.send(json.toString())
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    /**
+     * 🚀 新增：发送原始 JSON 字符串 (LocationService 极速雷达专用)
+     */
+    fun sendRawJson(jsonString: String) {
+        if (!isConnected) return
+        try {
+            webSocket?.send(jsonString)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        webSocket?.send(json.toString())
     }
 
     private fun scheduleReconnect() {
@@ -117,10 +138,4 @@ object WebSocketManager {
         currentUserId = -1
         reconnectHandler.removeCallbacksAndMessages(null)
     }
-
-    // 🚀 新增：专门用于长连接高速推送状态的底层后门
-    fun sendRawJson(jsonString: String) {
-        webSocket?.send(jsonString)
-    }
-
 }

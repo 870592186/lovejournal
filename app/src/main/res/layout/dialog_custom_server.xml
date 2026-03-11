@@ -24,14 +24,14 @@
             android:id="@+id/rb_official"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="官方服务器 (https://x.xtay.cn/)"
+            android:text="使用官方服务器"
             android:padding="8dp"/>
 
         <RadioButton
             android:id="@+id/rb_custom"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="自定义自建服务器"
+            android:text="使用自定义服务器"
             android:padding="8dp"/>
     </RadioGroup>
 

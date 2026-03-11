@@ -94,6 +94,14 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".util.ExternalCommandReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="cn.xtay.lovejournal.ACTION_EXTERNAL_CMD" />
+            </intent-filter>
+        </receiver>
+
 
         <meta-data
             android:name="com.amap.api.v2.apikey"

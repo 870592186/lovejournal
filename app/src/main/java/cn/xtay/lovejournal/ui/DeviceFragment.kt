@@ -10,7 +10,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import cn.xtay.lovejournal.R
 import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.model.PartnerData
@@ -42,18 +44,27 @@ class DeviceFragment : Fragment() {
     private lateinit var tvMySteps: TextView
     private lateinit var tvSyncHint: TextView
 
-    private val uiHandler = Handler(Looper.getMainLooper())
+    // 🚀 新增：下拉刷新控件
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
 
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var lastFetchTime = 0L // 🚀 新增：防抖动控制
+
+    // 🚀 优化后的 10 秒轮询任务
     private val uiTask = object : Runnable {
         override fun run() {
             updateMyUI()
-            fetchPartnerStatus()
+            fetchPartnerStatus(isSilent = true) // 定时刷新时静默请求，不弹 Toast
             uiHandler.postDelayed(this, 10000)
         }
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val view = inflater.inflate(R.layout.fragment_device, container, false)
+
+        // 🚀 初始化下拉刷新控件
+        swipeRefreshLayout = view.findViewById(R.id.swipe_refresh_layout)
+
         tvPartnerBattery = view.findViewById(R.id.tv_partner_battery)
         progressPartnerBattery = view.findViewById(R.id.progress_partner_battery)
         tvPartnerNet = view.findViewById(R.id.tv_partner_net)
@@ -70,20 +81,53 @@ class DeviceFragment : Fragment() {
         tvMyMicStatus = view.findViewById(R.id.tv_my_mic_status)
         tvMySteps = view.findViewById(R.id.tv_my_steps)
         tvSyncHint = view.findViewById(R.id.tv_sync_hint)
+
+        // 🚀 设置下拉刷新的颜色和监听器
+        val typedValue = android.util.TypedValue()
+        requireContext().theme.resolveAttribute(android.R.attr.colorPrimary, typedValue, true)
+        swipeRefreshLayout.setColorSchemeColors(typedValue.data)
+
+        swipeRefreshLayout.setOnRefreshListener {
+            updateMyUI() // 下拉时也顺便刷新一下自己的状态UI
+            fetchPartnerStatus(isSilent = false) // 手动下拉，不是静默
+        }
+
         return view
     }
 
-    private fun fetchPartnerStatus() {
+    // 🚀 改造获取数据方法，加入防抖和下拉动画控制
+    private fun fetchPartnerStatus(isSilent: Boolean = false) {
+        val now = System.currentTimeMillis()
+        // 防抖：1秒内不重复请求
+        if (now - lastFetchTime < 1000) {
+            swipeRefreshLayout.isRefreshing = false
+            return
+        }
+
         val uid = UserPrefs.getUserId(requireContext())
         val pid = UserPrefs.getPartnerId(requireContext())
+
         if (uid == -1 || pid == -1) {
+            swipeRefreshLayout.isRefreshing = false
             updatePartnerUI()
             return
+        }
+
+        // 如果是手动下拉，且正在刷新，给个友好提示
+        if (!isSilent && swipeRefreshLayout.isRefreshing) {
+            Toast.makeText(context, "正在获取TA的最新状态...", Toast.LENGTH_SHORT).show()
+        }
+
+        lastFetchTime = now
+        // 如果是代码触发的非静默刷新，强制显示加载圈
+        if (!swipeRefreshLayout.isRefreshing && !isSilent) {
+            swipeRefreshLayout.isRefreshing = true
         }
 
         NetworkClient.getApi(requireContext()).getStatus(userId = uid, partnerId = pid)
             .enqueue(object : Callback<UserResponse> {
                 override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
+                    swipeRefreshLayout.isRefreshing = false // 关闭动画
                     val res = response.body() ?: return
                     if (res.status == "success" && res.partner_data != null) {
                         UserPrefs.savePartnerDeviceJson(requireContext(), Gson().toJson(res.partner_data))
@@ -91,7 +135,8 @@ class DeviceFragment : Fragment() {
                     }
                 }
                 override fun onFailure(call: Call<UserResponse>, t: Throwable) {
-                    updatePartnerUI()
+                    swipeRefreshLayout.isRefreshing = false // 关闭动画
+                    updatePartnerUI() // 失败时用本地缓存兜底显示
                 }
             })
     }
@@ -161,11 +206,16 @@ class DeviceFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        uiHandler.post(uiTask)
+        // 进页面时先主动静默刷一次
+        updateMyUI()
+        fetchPartnerStatus(isSilent = true)
+        // 启动 10 秒轮询
+        uiHandler.postDelayed(uiTask, 10000)
     }
 
     override fun onPause() {
         super.onPause()
+        // 离开页面停止轮询
         uiHandler.removeCallbacks(uiTask)
     }
 }

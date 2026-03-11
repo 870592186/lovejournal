@@ -6,9 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.widget.Toast
 import cn.xtay.lovejournal.R
 
 class LocationTileService : TileService() {
@@ -48,7 +51,7 @@ class LocationTileService : TileService() {
         colonSplitter.setString(enabledServices)
         while (colonSplitter.hasNext()) {
             val componentName = colonSplitter.next()
-            if (componentName.equals("${packageName}/${KeepAliveAccessibilityService::class.java.name}", ignoreCase = true)) {
+            if (componentName.equals("${packageName}/${cn.xtay.lovejournal.service.KeepAliveAccessibilityService::class.java.name}", ignoreCase = true)) {
                 return true
             }
         }
@@ -65,7 +68,7 @@ class LocationTileService : TileService() {
         // 如果无障碍权限是在开着的，但是我们的核心 LocationService 却被系统杀了
         if (isAccessibilityEnabled() && !LocationService.isRunning) {
             // 直接借系统下拉栏的东风，静默复活核心服务！
-            startCoreService()
+            startCoreService(isSilent = true)
         }
 
         updateTileState()
@@ -96,17 +99,26 @@ class LocationTileService : TileService() {
         } else {
             // 情况 2：无障碍已开 -> 切换 LocationService 的开关状态
             if (LocationService.isRunning) {
-                stopService(Intent(this, LocationService::class.java))
+                try {
+                    stopService(Intent(this, LocationService::class.java))
+                } catch (e: Exception) { e.printStackTrace() }
             } else {
-                startCoreService()
+                startCoreService(isSilent = false)
             }
         }
 
-        // 操作完立即刷新一次 UI
-        updateTileState()
+        // 🚀 核心优化：异步延时刷新 UI，解决磁贴点击后看起来“卡顿”不刷新的问题
+        // 给系统 300 毫秒的时间去拉起或杀死服务，然后再读取 isRunning 状态
+        Handler(Looper.getMainLooper()).postDelayed({
+            updateTileState()
+        }, 300)
     }
 
-    private fun startCoreService() {
+    /**
+     * 启动核心服务
+     * @param isSilent 是否是后台静默唤醒（如果是后台唤醒，启动失败不弹Toast打扰用户）
+     */
+    private fun startCoreService(isSilent: Boolean) {
         try {
             val serviceIntent = Intent(this, LocationService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -116,6 +128,12 @@ class LocationTileService : TileService() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            // 拦截 Android 12+ 后台启动前台服务被拒的异常
+            if (!isSilent) {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(applicationContext, "启动失败，请打开应用后重试", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 }

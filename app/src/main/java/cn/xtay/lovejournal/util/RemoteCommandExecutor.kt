@@ -7,6 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import cn.xtay.lovejournal.service.KeepAliveAccessibilityService
+import okhttp3.FormBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 object RemoteCommandExecutor {
 
@@ -18,8 +21,41 @@ object RemoteCommandExecutor {
             "open_wechat" -> openApp(context, "com.tencent.mm")
             "take_screenshot" -> takeScreenshot()
             "fly_heart" -> HeartEffectUtil.showFloatingHeart(context) // 💖 核心新增：收到指令，直接起飞！
-            else -> { /* 未知指令忽略 */ }
+            else -> { return /* 未知指令忽略并退出，不执行清理 */ }
         }
+
+        // 🚀 核心自愈：一旦指令执行成功，立刻跨网追杀，抹除服务器上的残留指令
+        clearCommandOnServer(context)
+    }
+
+    /**
+     * 独立子线程 HTTP 处决器：直接暴力删除该用户的云端待执行命令
+     */
+    private fun clearCommandOnServer(context: Context) {
+        val uid = UserPrefs.getUserId(context)
+        val serverUrl = UserPrefs.getServerUrl(context)
+        if (uid <= 0 || serverUrl.isEmpty()) return
+
+        Thread {
+            try {
+                // 构建轻量级网络请求，直接访问 api.php
+                val url = "$serverUrl/api.php"
+                val formBody = FormBody.Builder()
+                    .add("action", "clear_command") // 🚀 专属强杀指令
+                    .add("user_id", uid.toString())
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .post(formBody)
+                    .build()
+
+                // 执行请求（不需要关心返回值，发出去就结束）
+                OkHttpClient().newCall(request).execute().use { response -> }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     private fun lockScreen(context: Context) {
