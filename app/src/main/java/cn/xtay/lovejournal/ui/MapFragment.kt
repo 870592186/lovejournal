@@ -34,6 +34,7 @@ import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MapFragment : Fragment() {
@@ -49,7 +50,7 @@ class MapFragment : Fragment() {
 
     private val dbDateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
 
-    // 极简冷却机制，告别卡顿屎山
+    // 极简冷却机制
     private var lastRefreshTime = 0L
     private var lastLocateTaTime = 0L
 
@@ -68,7 +69,6 @@ class MapFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
         val view = inflater.inflate(R.layout.fragment_map, container, false)
 
-        // 这里的 mapView 外层在 XML 里应该已经被你的 MapContainer 包裹了，防冲突交由 MapContainer 处理
         mapView = view.findViewById(R.id.map_view)
         tvMyAddr = view.findViewById(R.id.tv_my_address)
         tvPartnerAddr = view.findViewById(R.id.tv_partner_address)
@@ -81,9 +81,9 @@ class MapFragment : Fragment() {
             aMap?.uiSettings?.isZoomControlsEnabled = false
         }
 
-        tvMyAddr.text = renderStyledLocation("我的位置：", "等待刷新...", null, false)
+        tvMyAddr.text = renderStyledLocation("我的位置：", "读取中...", null, false)
 
-        // 🟢 刷新自己的位置 (3秒极简防抖 + 伪装拦截)
+        // 🟢 刷新自己的位置 (强制定点并同步)
         btnRefresh.setOnClickListener {
             if (checkDevSleepIntercept()) return@setOnClickListener
 
@@ -102,7 +102,7 @@ class MapFragment : Fragment() {
             forceSyncMyLocation()
         }
 
-        // 🟢 探测雷达 (30秒严厉冷却 + 伪装拦截)
+        // 🟢 探测雷达 (30秒严厉冷却)
         btnLocateTa.setOnClickListener {
             if (checkDevSleepIntercept()) return@setOnClickListener
 
@@ -122,15 +122,11 @@ class MapFragment : Fragment() {
 
             if (WebSocketManager.isConnected) {
                 Toast.makeText(context, "📡 已发射雷达波，正在唤醒对方后台...", Toast.LENGTH_SHORT).show()
-
-                // 1. 发射唤醒指令
                 WebSocketManager.sendMessage("send_to_partner", partnerId, "force_location")
 
-                // 2. 延迟 4.5 秒，等待对方基站定位完成并上传后，瞬间拉取结果！
                 view.postDelayed({
                     if (isAdded) pullPartnerLocation(moveToTa = true)
                 }, 4500)
-
             } else {
                 Toast.makeText(context, "网络通道未就绪，正在尝试普通拉取...", Toast.LENGTH_SHORT).show()
                 pullPartnerLocation(moveToTa = true)
@@ -145,24 +141,48 @@ class MapFragment : Fragment() {
         return try { rawTime.substring(11, 16) } catch (e: Exception) { "刚刚" }
     }
 
+    // 🚀 核心 UI 优化：统一加粗样式，将附加状态（stayMsg）取消换行，平铺到时间右侧
     private fun renderStyledLocation(label: String, address: String?, time: String?, isPartner: Boolean, stayMsg: String? = null): android.text.Spanned {
         val displayTime = formatTime(time)
         val addr = address ?: "位置获取中..."
         val colorMain = if (isPartner) "#FF5252" else "#2196F3"
-        val boldStart = if (isPartner) "<b>" else ""
-        val boldEnd = if (isPartner) "</b>" else ""
 
-        val stayHtml = if (!stayMsg.isNullOrEmpty()) "<br/><small><font color='#4CAF50'>☕ $stayMsg</font></small>" else ""
+        // 移除 <br/>，使用 &nbsp;&nbsp; 制造缩进空格，使状态与时间同行显示
+        val stayHtml = if (!stayMsg.isNullOrEmpty()) "&nbsp;&nbsp;<font color='#4CAF50'>☕ $stayMsg</font>" else ""
 
+        // 双方文字均使用 <b> 标签加粗，统一视觉层级大小
         val htmlSource = """
-            $boldStart<font color='$colorMain'>$label</font><font color='$colorMain'>$addr</font>$boldEnd<br/>
-            <small><font color='$colorMain'>● </font><font color='#888888'>更新于 $displayTime</font></small>$stayHtml
+            <b><font color='$colorMain'>$label</font><font color='$colorMain'>$addr</font></b><br/>
+            <small><font color='$colorMain'>● </font><font color='#888888'>更新于 $displayTime</font>$stayHtml</small>
         """.trimIndent()
 
         return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             Html.fromHtml(htmlSource, Html.FROM_HTML_MODE_LEGACY)
         } else {
             @Suppress("DEPRECATION") Html.fromHtml(htmlSource)
+        }
+    }
+
+    // 🚀 核心新增：秒读本地高德缓存位置，不耗电、不联网
+    private fun showMyCachedLocation() {
+        try {
+            val client = AMapLocationClient(requireContext().applicationContext)
+            val loc = client.lastKnownLocation
+            if (loc != null) {
+                myPos = LatLng(loc.latitude, loc.longitude)
+                refreshMapMarkers()
+                aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(myPos!!, 16f))
+
+                // 将本地时间戳转换为数据库的日期格式以适配 renderStyledLocation
+                val timeStr = dbDateFormat.format(Date(loc.time))
+                val addr = loc.address ?: "获取缓存地址中"
+                tvMyAddr.text = renderStyledLocation("我的位置：", addr, timeStr, false)
+            } else {
+                tvMyAddr.text = renderStyledLocation("我的位置：", "暂无缓存，请手动刷新", null, false)
+            }
+            client.onDestroy()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -201,7 +221,9 @@ class MapFragment : Fragment() {
                     refreshMapMarkers()
                     aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(myPos!!, 16f))
 
-                    tvMyAddr.text = renderStyledLocation("我的位置：", addr, null, false)
+                    // 更新为刚刚获取的实时时间
+                    val timeStr = dbDateFormat.format(Date(System.currentTimeMillis()))
+                    tvMyAddr.text = renderStyledLocation("我的位置：", addr, timeStr, false)
 
                     if (location.locationType == 1 || location.locationType == 5 || location.locationType == 6) {
                         val uid = UserPrefs.getUserId(requireContext())
@@ -343,7 +365,15 @@ class MapFragment : Fragment() {
         refreshMapMarkers()
     }
 
-    override fun onResume() { super.onResume(); mapView.onResume(); pullPartnerLocation(moveToTa = false) }
+    override fun onResume() {
+        super.onResume()
+        mapView.onResume()
+
+        // 🚀 进页双拉：秒读自己的本地缓存 + 并发获取对方的云端位置
+        showMyCachedLocation()
+        pullPartnerLocation(moveToTa = false)
+    }
+
     override fun onPause() { super.onPause(); mapView.onPause() }
     override fun onDestroy() { super.onDestroy(); mapView.onDestroy(); locationClient?.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); mapView.onSaveInstanceState(outState) }
