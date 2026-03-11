@@ -44,12 +44,5 @@ object NetworkClient {
         return cachedService!!
     }
 
-    /**
-     * 注意：因为现在是动态地址，原先代码中所有的：
-     * NetworkClient.apiService.syncAll(...)
-     * * 需要修改为：
-     * NetworkClient.getApi(this).syncAll(...)  // 在 Activity 中
-     * 或
-     * NetworkClient.getApi(requireContext()).syncAll(...) // 在 Fragment 中
-     */
+
 }

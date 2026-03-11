@@ -19,8 +19,8 @@ android {
         applicationId = "cn.xtay.lovejournal"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20206
-        versionName = "2.2.6"
+        versionCode = 20207
+        versionName = "2.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

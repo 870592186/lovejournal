@@ -70,7 +70,6 @@ class LocationService : Service() {
     private var lastLng: Double? = null
     private var lastAddr: String? = null
 
-    // 🚀 新增：记录最后一次真实定位成功的时间戳，用于亮屏 5 分钟判断
     private var lastLocationTime: Long = 0L
 
     private var pendingClearCommandTime: Long = 0L
@@ -83,6 +82,20 @@ class LocationService : Service() {
     private var fastTrackedApp: String = ""
     private var fastTrackedBattery: Int = -1
     private var fastTrackedMic: Int = -1
+
+    // 🚀 全局电量调试水管（支持外部无损注入）
+    private fun getCurrentBattery(): Int {
+        val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+        // 尝试读取外部注入的伪装电量（默认为 -1）
+        val mockLevel = prefs.getInt("mock_battery_level", -1)
+
+        if (mockLevel != -1) {
+            return mockLevel // 发现伪装电量，强行拦截，直接返回调试值！
+        }
+
+        // 如果没开启伪装（即为 -1），则老老实实读取手机真实的物理电量
+        return DeviceUtil.getBatteryLevel(this)
+    }
 
     private fun playHeartbeatVibration() {
         try {
@@ -99,6 +112,43 @@ class LocationService : Service() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    // 🚀 优化后的优雅顶部通知：短促震动三次 + 顶部横幅
+    private fun showEmergencyNotification(msg: String) {
+        val emergencyChannelId = "love_journal_emergency"
+        val notificationManager = getSystemService(NotificationManager::class.java)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                emergencyChannelId,
+                "紧急警报",
+                NotificationManager.IMPORTANCE_HIGH // 保持高重要性以允许顶部弹出
+            ).apply {
+                description = "对方电量濒危或紧急通知"
+                enableVibration(true)
+                // 🚀 震动波形修改：0延迟，震动200ms，停150ms... 循环三次，轻快醒目
+                vibrationPattern = longArrayOf(0, 200, 150, 200, 150, 200)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val notification = NotificationCompat.Builder(this, emergencyChannelId)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("🚨 紧急警报")
+            .setContentText(msg)
+            .setPriority(NotificationCompat.PRIORITY_HIGH) // 🚀 使用 HIGH 优先级，保证顶部悬浮横幅，不过分打断
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        notificationManager.notify(9999, notification)
     }
 
     private fun showTemporaryStatus(msg: String, durationMs: Long = 4000L) {
@@ -182,6 +232,7 @@ class LocationService : Service() {
                 "low_battery_alert" -> {
                     val msg = if (data.contains("msg")) JSONObject(data).optString("msg") else "TA的手机电量严重不足！"
                     Handler(Looper.getMainLooper()).post { Toast.makeText(this@LocationService, "🚨 紧急通知：$msg", Toast.LENGTH_LONG).show() }
+                    showEmergencyNotification(msg)
                 }
                 "sync_period" -> {
                     val intent = Intent("cn.xtay.lovejournal.WS_COMMAND").apply { setPackage(packageName); putExtra("command", "sync_period") }
@@ -225,6 +276,8 @@ class LocationService : Service() {
         override fun run() {
             val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
             val state = prefs.getInt("dev_sleep_state", 0)
+
+            // 🚀 你的专属逻辑：早上 8 点到 12 点，伪装模式自动关闭
             if (state == 1 || state == 2) {
                 val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
                 if (hour in 8..12) prefs.edit().putInt("dev_sleep_state", 0).apply()
@@ -260,7 +313,7 @@ class LocationService : Service() {
             }
 
             val currentApp = DeviceUtil.getForegroundApp(this@LocationService)
-            val currentBattery = DeviceUtil.getBatteryLevel(this@LocationService)
+            val currentBattery = getCurrentBattery()
             val currentMic = DeviceUtil.getMicBusyStatus(this@LocationService)
 
             if (currentApp != fastTrackedApp || currentBattery != fastTrackedBattery || currentMic != fastTrackedMic) {
@@ -271,6 +324,8 @@ class LocationService : Service() {
                 if (DeviceUtil.getNetworkInfo(this@LocationService).first != "无网络") {
                     uploadDataViaWebSocket()
                 }
+
+                checkLowBatteryAndSync()
             }
 
             syncHandler.postDelayed(this, 3000L)
@@ -291,7 +346,7 @@ class LocationService : Service() {
     }
 
     private fun checkLowBatteryAndSync() {
-        val battery = DeviceUtil.getBatteryLevel(this)
+        val battery = getCurrentBattery()
         if (battery <= 10 && !hasSentLowBatteryWarning) {
             hasSentLowBatteryWarning = true
             triggerSingleLocation(true)
@@ -311,6 +366,7 @@ class LocationService : Service() {
 
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
+                    // 🚀 你的专属逻辑：息屏时如果是 state 2，自动重置回正常模式
                     if (state == 2) {
                         prefs.edit().putInt("dev_sleep_state", 0).apply()
                         state = 0
@@ -321,7 +377,6 @@ class LocationService : Service() {
                     syncHandler.removeCallbacks(fastStateMonitorRunnable)
                     acquireTempWakeLock(60000L)
 
-                    // 🚀 优化：息屏瞬间绝对不再唤起定位，统一只用缓存坐标同步状态！
                     if (netType == "WiFi") {
                         uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤")
                     } else {
@@ -340,7 +395,6 @@ class LocationService : Service() {
                         releasePendingCommands()
                         checkLowBatteryAndSync()
 
-                        // 🚀 优化：亮屏瞬间使用缓存直接同步。如果非WiFi，且距离上次真实定位超过 5 分钟，才拉起高德！
                         if (netType == "WiFi") {
                             uploadData(lastLat, lastLng, lastAddr, null)
                         } else {
@@ -517,7 +571,6 @@ class LocationService : Service() {
                             lastLat = location.latitude
                             lastLng = location.longitude
                             lastAddr = location.address ?: ""
-                            // 🚀 记录最后一次真实获取有效位置的时间
                             lastLocationTime = System.currentTimeMillis()
                         }
 
@@ -587,7 +640,7 @@ class LocationService : Service() {
                 put("user_id", uid)
                 put("device_id", Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID))
                 put("fg_app", DeviceUtil.getForegroundApp(this@LocationService))
-                put("battery", DeviceUtil.getBatteryLevel(this@LocationService))
+                put("battery", getCurrentBattery())
                 put("mic_busy", DeviceUtil.getMicBusyStatus(this@LocationService))
                 put("net_type", DeviceUtil.getNetworkInfo(this@LocationService).first)
                 put("wifi_name", DeviceUtil.getNetworkInfo(this@LocationService).second)
@@ -616,7 +669,7 @@ class LocationService : Service() {
                     put("user_id", uid)
                     put("device_id", Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID))
                     put("fg_app", finalFgApp)
-                    put("battery", DeviceUtil.getBatteryLevel(this@LocationService))
+                    put("battery", getCurrentBattery())
                     put("mic_busy", DeviceUtil.getMicBusyStatus(this@LocationService))
                     put("net_type", DeviceUtil.getNetworkInfo(this@LocationService).first)
                     put("wifi_name", DeviceUtil.getNetworkInfo(this@LocationService).second)
@@ -633,7 +686,7 @@ class LocationService : Service() {
 
         NetworkClient.getApi(this).syncAll(
             action = "sync_all", userId = uid, deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID),
-            lat = lat, lng = lng, address = addr, battery = DeviceUtil.getBatteryLevel(this),
+            lat = lat, lng = lng, address = addr, battery = getCurrentBattery(),
             netType = DeviceUtil.getNetworkInfo(this).first, wifiName = DeviceUtil.getNetworkInfo(this).second,
             fgApp = finalFgApp, micBusy = DeviceUtil.getMicBusyStatus(this),
             steps = DeviceUtil.getStepCount(this), topApps = "[]",

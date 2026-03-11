@@ -26,6 +26,27 @@ class ExternalCommandReceiver : BroadcastReceiver() {
             "enable_sleep" -> setSleepState(context, 1)
             "disable_sleep" -> setSleepState(context, 0)
             "fly_heart" -> handleFlyHeart(context)
+            // 🚀 新增：无损电量调试接口
+            "mock_battery" -> {
+                // 兼容 int 和 string 两种传参方式，默认为 -1（代表恢复真实电量）
+                var level = intent.getIntExtra("level", -1)
+                if (level == -1) {
+                    level = intent.getStringExtra("level")?.toIntOrNull() ?: -1
+                }
+                setMockBattery(context, level)
+            }
+        }
+    }
+
+    // 🚀 新增：处理无损电量调试
+    private fun setMockBattery(context: Context, level: Int) {
+        val prefs = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putInt("mock_battery_level", level).apply()
+
+        if (level == -1) {
+            Toast.makeText(context, "✅ 已恢复读取真实物理电量", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "🧪 调试模式：全局电量已被锁死为 $level%", Toast.LENGTH_SHORT).show()
         }
     }
 

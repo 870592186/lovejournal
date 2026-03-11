@@ -99,6 +99,14 @@ interface ApiService {
         @Field("time") time: Long
     ): Call<UserResponse>
 
+    // 🚀 补充完善：将物理抹除指令的动作也纳入标准接口，告别原生代码拼装！
+    @FormUrlEncoded
+    @POST("love_api/api.php")
+    fun clearCommand(
+        @Field("action") action: String = "clear_command",
+        @Field("user_id") userId: Int
+    ): Call<UserResponse>
+
     @GET("love_api/update.json")
     fun checkAppUpdate(): Call<ResponseBody>
 }
