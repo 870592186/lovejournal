@@ -48,7 +48,7 @@ object WebSocketManager {
             "ws://$host:8282"
         } catch (e: Exception) {
             e.printStackTrace()
-            "ws://x.xtay.cn:8282"
+            "wss://x.xtay.cn/ws"
         }
     }
 
