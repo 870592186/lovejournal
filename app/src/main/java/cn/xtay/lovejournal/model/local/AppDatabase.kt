@@ -10,11 +10,15 @@ import androidx.room.RoomDatabase
  * entities: 声明包含哪些表
  * version: 数据库版本，以后改表结构需要升级版本号
  */
-@Database(entities = [LocationEntity::class], version = 1, exportSchema = false)
+// 🚀 新增：将 ChatEntity 加入 entities 列表，并将 version 升级为 2
+@Database(entities = [LocationEntity::class, ChatEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
-    // 绑定我们的管家
+    // 绑定我们的定位管家
     abstract fun locationDao(): LocationDao
+
+    // 🚀 新增：绑定聊天数据的管家
+    abstract fun chatDao(): ChatDao
 
     companion object {
         // Volatile 保证了多个线程访问时数据的同步性

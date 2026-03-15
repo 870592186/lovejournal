@@ -2,4 +2,5 @@
 <paths>
     <external-path name="download" path="Download" />
     <external-cache-path name="external_cache" path="." />
+    <files-path name="my_chat_files" path="chat_media/" />
 </paths>

@@ -26,7 +26,6 @@ object UserPrefs {
     private const val KEY_STEP_BASELINE = "step_baseline"
     private const val KEY_STEP_DAY = "step_day"
 
-    // 动态策略与远控配置缓存 Key
     private const val KEY_EXEMPT_APPS = "exempt_apps"
     private const val KEY_ENABLE_BATTERY_EXEMPT = "enable_battery_exempt"
     private const val KEY_BATTERY_THRESHOLD = "battery_threshold"
@@ -42,10 +41,10 @@ object UserPrefs {
     private const val KEY_NOTIF_OFFLINE = "notif_offline"
     private const val KEY_NOTIF_MOVING = "notif_moving"
     private const val KEY_NOTIF_ERROR = "notif_error"
+    private const val KEY_NOTIF_NEW_MSG = "notif_new_msg"
 
     private const val KEY_OTA_IGNORED_VERSION = "ota_ignored_version"
 
-    // 💖 核心新增：专门供小组件使用的数据缓存 Key
     private const val KEY_WIDGET_PARTNER_BATTERY = "widget_partner_battery"
     private const val KEY_WIDGET_PARTNER_APP = "widget_partner_app"
     private const val KEY_WIDGET_PARTNER_ADDRESS = "widget_partner_address"
@@ -54,10 +53,7 @@ object UserPrefs {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    // ==========================================
-    // 💖 核心新增：小组件专属数据存取方法
-    // ==========================================
-
+    // --- Widget 相关 ---
     fun saveWidgetData(context: Context, battery: Int, app: String, address: String) {
         getPrefs(context).edit().apply {
             putInt(KEY_WIDGET_PARTNER_BATTERY, battery)
@@ -71,18 +67,23 @@ object UserPrefs {
     fun getWidgetPartnerApp(context: Context): String = getPrefs(context).getString(KEY_WIDGET_PARTNER_APP, "") ?: ""
     fun getWidgetPartnerAddress(context: Context): String = getPrefs(context).getString(KEY_WIDGET_PARTNER_ADDRESS, "") ?: ""
 
-    // ==========================================
-
-    fun saveNickname(context: Context, name: String) {
+    // --- 个人昵称相关 (修复 ChatActivity 爆红) ---
+    fun saveUserNickname(context: Context, name: String) {
         getPrefs(context).edit().putString(KEY_MY_NICKNAME, name).apply()
     }
+    fun getUserNickname(context: Context): String = getPrefs(context).getString(KEY_MY_NICKNAME, "") ?: ""
+
+    // 保留原有方法名防止其他地方调用
+    fun saveNickname(context: Context, name: String) = saveUserNickname(context, name)
     fun getNickname(context: Context): String? = getPrefs(context).getString(KEY_MY_NICKNAME, null)
 
+    // --- 对方昵称相关 ---
     fun savePartnerNickname(context: Context, name: String) {
         getPrefs(context).edit().putString(KEY_PARTNER_NICKNAME, name).apply()
     }
-    fun getPartnerNickname(context: Context): String? = getPrefs(context).getString(KEY_PARTNER_NICKNAME, null)
+    fun getPartnerNickname(context: Context): String = getPrefs(context).getString(KEY_PARTNER_NICKNAME, "") ?: "TA"
 
+    // --- 服务器配置同步 ---
     fun saveServerConfigData(context: Context, config: cn.xtay.lovejournal.model.ServerConfig) {
         getPrefs(context).edit().apply {
             putString(KEY_EXEMPT_APPS, config.exempt_apps ?: "")
@@ -110,22 +111,18 @@ object UserPrefs {
         getPrefs(context).edit().putString(KEY_REMOTE_COMMAND, "").putLong(KEY_COMMAND_TIME, 0L).apply()
     }
 
+    // --- 步数相关 ---
     fun saveStepBaseline(context: Context, steps: Int) {
         getPrefs(context).edit().putInt(KEY_STEP_BASELINE, steps).apply()
     }
-
-    fun getStepBaseline(context: Context): Int {
-        return getPrefs(context).getInt(KEY_STEP_BASELINE, 0)
-    }
+    fun getStepBaseline(context: Context): Int = getPrefs(context).getInt(KEY_STEP_BASELINE, 0)
 
     fun saveStepDay(context: Context, day: String) {
         getPrefs(context).edit().putString(KEY_STEP_DAY, day).apply()
     }
+    fun getStepDay(context: Context): String? = getPrefs(context).getString(KEY_STEP_DAY, null)
 
-    fun getStepDay(context: Context): String? {
-        return getPrefs(context).getString(KEY_STEP_DAY, null)
-    }
-
+    // --- 服务器 URL 相关 ---
     fun getServerUrl(context: Context): String {
         val useCustom = getPrefs(context).getBoolean(KEY_USE_CUSTOM_SERVER, false)
         return if (useCustom) {
@@ -135,9 +132,7 @@ object UserPrefs {
         }
     }
 
-    fun getCustomServerUrlRaw(context: Context): String {
-        return getPrefs(context).getString(KEY_CUSTOM_SERVER_URL, "") ?: ""
-    }
+    fun getCustomServerUrlRaw(context: Context): String = getPrefs(context).getString(KEY_CUSTOM_SERVER_URL, "") ?: ""
 
     fun saveServerConfig(context: Context, useCustom: Boolean, url: String) {
         var formattedUrl = url.trim()
@@ -151,21 +146,12 @@ object UserPrefs {
         }
     }
 
-    fun isUsingCustomServer(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_USE_CUSTOM_SERVER, false)
-    }
+    fun isUsingCustomServer(context: Context): Boolean = getPrefs(context).getBoolean(KEY_USE_CUSTOM_SERVER, false)
 
-    fun isUsingCustomAMap(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_USE_CUSTOM_AMAP, false)
-    }
-
-    fun getCustomAMapKeyRaw(context: Context): String {
-        return getPrefs(context).getString(KEY_CUSTOM_AMAP_KEY, "") ?: ""
-    }
-
-    fun getAMapKey(context: Context): String {
-        return getPrefs(context).getString(KEY_CUSTOM_AMAP_KEY, "") ?: ""
-    }
+    // --- 高德 AMap 相关 ---
+    fun isUsingCustomAMap(context: Context): Boolean = getPrefs(context).getBoolean(KEY_USE_CUSTOM_AMAP, false)
+    fun getCustomAMapKeyRaw(context: Context): String = getPrefs(context).getString(KEY_CUSTOM_AMAP_KEY, "") ?: ""
+    fun getAMapKey(context: Context): String = getPrefs(context).getString(KEY_CUSTOM_AMAP_KEY, "") ?: ""
 
     fun saveAMapConfig(context: Context, useCustom: Boolean, key: String) {
         getPrefs(context).edit().apply {
@@ -175,6 +161,7 @@ object UserPrefs {
         }
     }
 
+    // --- 登录状态相关 ---
     fun saveIsLoggedIn(context: Context, logged: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_IS_LOGGED_IN, logged).apply()
     }
@@ -186,13 +173,11 @@ object UserPrefs {
     fun saveUserId(context: Context, userId: Int) {
         getPrefs(context).edit().putInt(KEY_USER_ID, userId).apply()
     }
-
     fun getUserId(context: Context): Int = getPrefs(context).getInt(KEY_USER_ID, -1)
 
     fun savePartnerId(context: Context, partnerId: Int) {
         getPrefs(context).edit().putInt(KEY_PARTNER_ID, partnerId).apply()
     }
-
     fun getPartnerId(context: Context): Int = getPrefs(context).getInt(KEY_PARTNER_ID, -1)
 
     fun saveLoginInfo(context: Context, id: Int, name: String, code: String, partnerId: Int?) {
@@ -213,26 +198,24 @@ object UserPrefs {
         getPrefs(context).edit().clear().apply()
     }
 
+    // --- 隐私相关 ---
     fun setHideRecentsEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_HIDE_RECENTS, enabled).apply()
     }
+    fun isHideRecentsEnabled(context: Context): Boolean = getPrefs(context).getBoolean(KEY_HIDE_RECENTS, false)
 
-    fun isHideRecentsEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_HIDE_RECENTS, false)
-    }
-
+    // --- 数据存储相关 ---
     fun saveLocalPeriods(context: Context, json: String) {
         getPrefs(context).edit().putString(KEY_LOCAL_PERIODS, json).apply()
     }
-
     fun getLocalPeriods(context: Context): String? = getPrefs(context).getString(KEY_LOCAL_PERIODS, null)
 
     fun savePartnerDeviceJson(context: Context, json: String) {
         getPrefs(context).edit().putString(KEY_PARTNER_DATA_JSON, json).apply()
     }
-
     fun getPartnerDeviceJson(context: Context): String? = getPrefs(context).getString(KEY_PARTNER_DATA_JSON, null)
 
+    // --- 通知文案自定义 ---
     fun saveNotifTitle(context: Context, v: String) = getPrefs(context).edit().putString(KEY_NOTIF_TITLE, v).apply()
     fun getNotifTitle(context: Context): String = getPrefs(context).getString(KEY_NOTIF_TITLE, "") ?: ""
 
@@ -248,11 +231,12 @@ object UserPrefs {
     fun saveNotifError(context: Context, v: String) = getPrefs(context).edit().putString(KEY_NOTIF_ERROR, v).apply()
     fun getNotifError(context: Context): String = getPrefs(context).getString(KEY_NOTIF_ERROR, "") ?: ""
 
+    fun saveNotifNewMsg(context: Context, v: String) = getPrefs(context).edit().putString(KEY_NOTIF_NEW_MSG, v).apply()
+    fun getNotifNewMsg(context: Context): String = getPrefs(context).getString(KEY_NOTIF_NEW_MSG, "") ?: ""
+
+    // --- OTA 版本相关 ---
     fun saveIgnoredVersion(context: Context, version: Int) {
         getPrefs(context).edit().putInt(KEY_OTA_IGNORED_VERSION, version).apply()
     }
-
-    fun getIgnoredVersion(context: Context): Int {
-        return getPrefs(context).getInt(KEY_OTA_IGNORED_VERSION, 0)
-    }
+    fun getIgnoredVersion(context: Context): Int = getPrefs(context).getInt(KEY_OTA_IGNORED_VERSION, 0)
 }

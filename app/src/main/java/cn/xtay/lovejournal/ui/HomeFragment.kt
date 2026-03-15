@@ -3,6 +3,7 @@ package cn.xtay.lovejournal.ui
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -16,11 +17,14 @@ import androidx.fragment.app.Fragment
 import cn.xtay.lovejournal.R
 import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.util.UserPrefs
+import com.google.android.material.button.MaterialButton
 
 class HomeFragment : Fragment() {
 
     private lateinit var btnSendHeart: ImageView
     private lateinit var tvStatus: TextView
+    // 🚀 新增：聊天入口按钮变量
+    private lateinit var btnOpenChat: MaterialButton
     private var isSending = false
 
     // 🛡️ 核心隐秘拦截网：检查是否开启了深度伪装
@@ -45,6 +49,24 @@ class HomeFragment : Fragment() {
 
         btnSendHeart = view.findViewById(R.id.btn_send_heart)
         tvStatus = view.findViewById(R.id.tv_status)
+        // 🚀 新增：绑定聊天按钮
+        btnOpenChat = view.findViewById(R.id.btn_open_chat)
+
+        // 🚀 新增：进入聊天室的点击事件
+        btnOpenChat.setOnClickListener {
+            // 🛡️ 同样受伪装模式保护：伪装时禁止进入聊天室，防暴露！
+            if (checkDevSleepIntercept()) return@setOnClickListener
+
+            val partnerId = UserPrefs.getPartnerId(requireContext())
+            if (partnerId <= 0) {
+                Toast.makeText(requireContext(), "请先在设置中绑定另一半", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            // 跳转到私密聊天页面
+            val intent = Intent(requireContext(), ChatActivity::class.java)
+            startActivity(intent)
+        }
 
         btnSendHeart.setOnClickListener {
             // 🛡️ 如果开启了深度伪装，直接拦截发送，保护自己！

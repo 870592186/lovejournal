@@ -30,6 +30,10 @@
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
 
     <queries>
         <intent>
@@ -121,6 +125,22 @@
             android:exported="false"
             android:theme="@style/Theme.情侣手记"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ChatActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:launchMode="standard"
+            android:screenOrientation="portrait"/>
+
+        <activity
+            android:name=".ui.VideoPlayerActivity"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+
+
+
 
         <receiver
             android:name=".widget.CoupleWidgetProvider"

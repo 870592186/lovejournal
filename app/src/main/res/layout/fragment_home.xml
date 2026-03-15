@@ -57,4 +57,18 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/btn_send_heart" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_open_chat"
+        android:layout_width="wrap_content"
+        android:layout_height="56dp"
+        android:layout_marginBottom="80dp"
+        android:text="💬 进入私密通讯局"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        app:backgroundTint="#4F46E5"
+        app:cornerRadius="28dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

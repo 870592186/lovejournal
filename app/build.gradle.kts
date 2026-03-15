@@ -19,8 +19,8 @@ android {
         applicationId = "cn.xtay.lovejournal"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20207
-        versionName = "2.2.7"
+        versionCode = 20208
+        versionName = "2.2.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -71,7 +71,7 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    implementation("com.google.android.material:material:1.11.0")
+    implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.viewpager2:viewpager2:1.0.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
@@ -86,7 +86,6 @@ dependencies {
     implementation("com.jakewharton.threetenabp:threetenabp:1.4.4")
 
 
-
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
 
@@ -99,6 +98,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.1")
 // 💖 引入 Glide 图片加载库（专门用来丝滑播放 GIF）
     implementation("com.github.bumptech.glide:glide:4.16.0")
+
+
 
 
 }

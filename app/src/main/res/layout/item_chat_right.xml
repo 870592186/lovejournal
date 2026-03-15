@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="end"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginStart="60dp"
+        android:clipChildren="false"
+        android:clipToPadding="false">
+
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end">
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/layoutContent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="?attr/colorPrimary"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="0dp"
+                android:minWidth="65dp"
+                app:strokeWidth="0dp">
+
+                <FrameLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        android:id="@+id/ivImage"
+                        android:layout_width="220dp"
+                        android:layout_height="wrap_content"
+                        android:adjustViewBounds="true"
+                        android:maxHeight="300dp"
+                        android:scaleType="centerCrop"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvVideoInfo"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom|start"
+                        android:layout_margin="8dp"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="4dp"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:padding="8dp"
+                        android:maxWidth="260dp"
+                        android:gravity="center_horizontal"
+                        android:layout_gravity="center_horizontal"
+                        android:textColor="?attr/colorOnPrimary"
+                        android:textSize="16sp"
+                        android:lineSpacingExtra="4dp" />
+                </FrameLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <ImageView
+                android:id="@+id/ivBurnFlag"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@android:drawable/ic_menu_view"
+                app:tint="?attr/colorOnPrimary"
+                android:layout_gravity="bottom|end"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="4dp"
+                android:alpha="0.5"
+                android:visibility="gone"/>
+
+            <LinearLayout
+                android:id="@+id/layoutBurned"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_dashed_ash"
+                android:visibility="gone">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:padding="16dp"
+                    android:text="💨"
+                    android:textColor="?attr/colorOutline"
+                    android:textSize="12sp"
+                    android:textStyle="italic"/>
+            </LinearLayout>
+
+            <View
+                android:id="@+id/layoutMask"
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:visibility="gone"/>
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="4dp"
+            android:paddingHorizontal="4dp">
+
+            <TextView
+                android:id="@+id/tvBurnFlag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔥"
+                android:textColor="?attr/colorError"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/tvTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:textColor="?attr/colorOutline"
+                android:textSize="11sp" />
+
+            <ImageView
+                android:id="@+id/ivStatus"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                app:tint="?attr/colorPrimary"
+                android:visibility="gone" />
+        </LinearLayout>
+
+    </LinearLayout>
+</LinearLayout>

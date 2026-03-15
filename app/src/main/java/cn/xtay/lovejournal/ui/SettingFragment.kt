@@ -12,6 +12,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
@@ -24,10 +26,12 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import cn.xtay.lovejournal.LoginActivity
+import cn.xtay.lovejournal.MainActivity
 import cn.xtay.lovejournal.R
 import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.model.local.AppDatabase
 import cn.xtay.lovejournal.net.NetworkClient
+import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.service.LocationService
 import cn.xtay.lovejournal.util.UserPrefs
 import cn.xtay.lovejournal.util.UpdateManager
@@ -38,6 +42,7 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -56,7 +61,6 @@ class SettingFragment : Fragment() {
 
     private val updateManager by lazy { UpdateManager(requireContext()) }
 
-    // 🛡️ 核心隐秘拦截网：检查是否开启了深度伪装
     private fun checkDevSleepIntercept(): Boolean {
         val state = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
         if (state == 1 || state == 2) {
@@ -66,7 +70,6 @@ class SettingFragment : Fragment() {
         return false
     }
 
-    // 📸 现代化的图片选择器
     private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data?.data != null) {
             try {
@@ -99,25 +102,21 @@ class SettingFragment : Fragment() {
         refreshUI()
         checkLatestStatus()
 
-        // 💖 账号卡片点击逻辑
         cardAccountInfo.setOnClickListener {
             if (UserPrefs.getPartnerId(requireContext()) <= 0) showBindDialog() else showAlreadyBoundInfo()
         }
 
-        // 头像点击
         ivWidgetAvatarSetup.setOnClickListener {
             if (checkDevSleepIntercept()) return@setOnClickListener
             pickImageLauncher.launch(Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI))
         }
 
-        // 隐藏最近任务开关
         switchHideRecents.isChecked = UserPrefs.isHideRecentsEnabled(requireContext())
         switchHideRecents.setOnCheckedChangeListener { _, isChecked ->
             UserPrefs.setHideRecentsEnabled(requireContext(), isChecked)
             applyHideRecents(isChecked)
         }
 
-        // 各大功能入口 (加入拦截网)
         view.findViewById<TextView>(R.id.tv_server_manage).setOnClickListener {
             if (checkDevSleepIntercept()) return@setOnClickListener
             showServerSettingDialog()
@@ -126,6 +125,7 @@ class SettingFragment : Fragment() {
             if (checkDevSleepIntercept()) return@setOnClickListener
             showAMapSettingDialog()
         }
+
         view.findViewById<TextView>(R.id.tv_location_logs)?.setOnClickListener {
             if (checkDevSleepIntercept()) return@setOnClickListener
             showLocationLogsDialog()
@@ -153,7 +153,6 @@ class SettingFragment : Fragment() {
         btnLogout = view.findViewById(R.id.btn_logout)
         ivWidgetAvatarSetup = view.findViewById(R.id.iv_widget_avatar_setup)
 
-        // 回显旧头像
         val avatarFile = File(requireContext().filesDir, "widget_avatar.jpg")
         if (avatarFile.exists()) {
             ivWidgetAvatarSetup.setImageBitmap(BitmapFactory.decodeFile(avatarFile.absolutePath))
@@ -174,9 +173,6 @@ class SettingFragment : Fragment() {
         }
     }
 
-    // ==========================================
-    // 🎭 核心暗号区：温馨提示与开发者伪装 (重构版)
-    // ==========================================
     private fun showAlreadyBoundInfo() {
         val myUsername = UserPrefs.getUsername(requireContext()) ?: "未知账号"
         val myNickname = UserPrefs.getNickname(requireContext()) ?: "未设置"
@@ -184,7 +180,6 @@ class SettingFragment : Fragment() {
 
         val message = "当前账号：$myUsername\n我的昵称：$myNickname\n\n你已经和 $partner 紧紧相连啦 ❤️\n\n祝地久天长白头偕老"
 
-        // 注意：这里的 setPositiveButton 传了 null，为了剥夺它的自动关闭权限
         val dialog = MaterialAlertDialogBuilder(requireContext())
             .setTitle("温馨提示")
             .setMessage(message)
@@ -195,60 +190,50 @@ class SettingFragment : Fragment() {
             }
             .show()
 
-        // 强行接管“我知道了”按钮的点击事件
         val positiveBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
 
         var isDetectionWindowOpen = false
         var windowOpenTime = 0L
         var comboCount = 0
 
-        // 1. 长按逻辑：开启探测窗口，或者直接解除伪装
         positiveBtn.setOnLongClickListener {
             val prefs = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
             val state = prefs.getInt("dev_sleep_state", 0)
 
             if (state == 1 || state == 2) {
-                // 当前是伪装状态：长按直接解除
                 prefs.edit().putInt("dev_sleep_state", 2).apply()
                 Toast.makeText(requireContext(), "深度省电待息屏后解除", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             } else {
-                // 当前是正常状态：长按开启连击判定窗口 (2秒)
                 isDetectionWindowOpen = true
                 windowOpenTime = System.currentTimeMillis()
                 comboCount = 0
-                Toast.makeText(requireContext(), "", Toast.LENGTH_SHORT).show() // 弹出空白暗号
+                Toast.makeText(requireContext(), "", Toast.LENGTH_SHORT).show()
             }
-            true // 消费掉长按事件
+            true
         }
 
-        // 2. 短按逻辑：5连击触发，或者正常关闭
         positiveBtn.setOnClickListener {
             val prefs = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
             val state = prefs.getInt("dev_sleep_state", 0)
 
-            // 如果处于判定窗口期，开始记录连击
             if (state == 0 && isDetectionWindowOpen) {
                 val now = System.currentTimeMillis()
-                if (now - windowOpenTime <= 2000) { // 必须在2秒内
+                if (now - windowOpenTime <= 2000) {
                     comboCount++
                     if (comboCount == 5) {
-                        // 连击达成！激活隐身衣！
                         prefs.edit().putInt("dev_sleep_state", 1).apply()
                         Toast.makeText(requireContext(), "已开启深度省电", Toast.LENGTH_SHORT).show()
                         isDetectionWindowOpen = false
                         comboCount = 0
                         dialog.dismiss()
                     }
-                    return@setOnClickListener // 连击期间，不关闭弹窗！
+                    return@setOnClickListener
                 } else {
-                    // 超时了，判定窗口关闭
                     isDetectionWindowOpen = false
                     comboCount = 0
                 }
             }
-
-            // 平时点一下，或者过了 2 秒判定期再点，就直接关闭弹窗
             dialog.dismiss()
         }
     }
@@ -268,20 +253,46 @@ class SettingFragment : Fragment() {
             .setView(input)
             .setPositiveButton("保存更改") { _, _ ->
                 val newNick = input.text.toString().trim()
-                if (newNick.isEmpty()) { Toast.makeText(requireContext(), "昵称不能为空！", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
-                UserPrefs.saveNickname(requireContext(), newNick)
-                refreshUI()
-                Toast.makeText(requireContext(), "昵称修改成功！", Toast.LENGTH_SHORT).show()
+                if (newNick.isEmpty()) {
+                    Toast.makeText(requireContext(), "昵称不能为空！", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
                 val myId = UserPrefs.getUserId(requireContext())
+                val partnerId = UserPrefs.getPartnerId(requireContext())
+
                 NetworkClient.getApi(requireContext()).updateNickname(userId = myId, nickname = newNick).enqueue(object : Callback<UserResponse> {
-                    override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {}
-                    override fun onFailure(call: Call<UserResponse>, t: Throwable) {}
+                    override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
+                        if (response.isSuccessful && response.body()?.status == "success") {
+                            UserPrefs.saveNickname(requireContext(), newNick)
+                            refreshUI()
+                            Toast.makeText(requireContext(), "昵称修改成功！", Toast.LENGTH_SHORT).show()
+
+                            if (partnerId > 0 && WebSocketManager.isConnected) {
+                                val payload = JSONObject().apply {
+                                    put("type", "nickname_changed")
+                                    put("new_nickname", newNick)
+                                }
+                                WebSocketManager.sendMessage(
+                                    action = "send_to_partner",
+                                    targetId = partnerId,
+                                    command = "system_update",
+                                    data = payload
+                                )
+                            }
+                        } else {
+                            Toast.makeText(requireContext(), "修改失败：${response.body()?.message ?: "未知错误"}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    override fun onFailure(call: Call<UserResponse>, t: Throwable) {
+                        Toast.makeText(requireContext(), "网络错误，修改失败", Toast.LENGTH_SHORT).show()
+                    }
                 })
             }.setNegativeButton("取消", null).show()
     }
 
     private fun showLogoutConfirmDialog() {
-        MaterialAlertDialogBuilder(requireContext()).setTitle("退出账号").setMessage("退出后将停止守护，确定吗？")
+        MaterialAlertDialogBuilder(requireContext()).setTitle("退出账号").setMessage("退出后将清空所有数据并停止守护，确定吗？")
             .setPositiveButton("确定退出") { _, _ -> performLogout() }.setNegativeButton("取消", null).show()
     }
 
@@ -298,7 +309,19 @@ class SettingFragment : Fragment() {
         if (avatarFile.exists()) avatarFile.delete()
 
         lifecycleScope.launch(Dispatchers.IO) {
-            AppDatabase.getDatabase(requireContext()).locationDao().clearAll()
+            try {
+                // 🚀 深度清理：清空数据库内所有表（包括聊天记录、定位日志等）
+                AppDatabase.getDatabase(requireContext()).locationDao().clearAll() // 保留原有保险逻辑
+                AppDatabase.getDatabase(requireContext()).clearAllTables() // 连根拔起
+                // 🚀 深度清理：彻底销毁本地存储的聊天多媒体文件
+                val mediaDir = File(requireContext().filesDir, "chat_media")
+                if (mediaDir.exists()) mediaDir.deleteRecursively()
+                // 🚀 深度清理：清空临时缓存区遗留的加密解密碎片
+                requireContext().cacheDir.listFiles()?.forEach { it.delete() }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
             withContext(Dispatchers.Main) {
                 requireContext().stopService(Intent(requireContext(), LocationService::class.java))
                 UserPrefs.clear(requireContext())
@@ -309,7 +332,6 @@ class SettingFragment : Fragment() {
         }
     }
 
-    // 🌟 高亮单选框封装
     private fun updateRadioHighlight(rg: RadioGroup, checkedId: Int) {
         for (i in 0 until rg.childCount) {
             val rb = rg.getChildAt(i) as? RadioButton ?: continue
@@ -364,7 +386,20 @@ class SettingFragment : Fragment() {
                 AlertDialog.Builder(requireContext()).setTitle("⚠️ 更换服务器警告").setMessage("将清空当前所有本地数据并退出登录。")
                     .setPositiveButton("确定清空并切换") { _, _ ->
                         lifecycleScope.launch(Dispatchers.IO) {
-                            AppDatabase.getDatabase(requireContext()).locationDao().clearAll()
+                            try {
+                                // 🚀 深度清理：清空数据库内所有表（包括聊天记录、定位日志等）
+                                AppDatabase.getDatabase(requireContext()).locationDao().clearAll()
+                                AppDatabase.getDatabase(requireContext()).clearAllTables()
+                                // 🚀 深度清理：彻底销毁本地存储的多媒体文件和头像
+                                val mediaDir = File(requireContext().filesDir, "chat_media")
+                                if (mediaDir.exists()) mediaDir.deleteRecursively()
+                                val avatarFile = File(requireContext().filesDir, "widget_avatar.jpg")
+                                if (avatarFile.exists()) avatarFile.delete()
+                                // 🚀 深度清理：清空临时缓存区碎片
+                                requireContext().cacheDir.listFiles()?.forEach { it.delete() }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
                             withContext(Dispatchers.Main) {
                                 requireContext().stopService(Intent(requireContext(), LocationService::class.java))
                                 UserPrefs.clear(requireContext())
@@ -380,6 +415,7 @@ class SettingFragment : Fragment() {
 
     private fun showAMapSettingDialog() {
         val v = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_amap_config, null)
+
         val rg = v.findViewById<RadioGroup>(R.id.rg_amap_choice)
         val rbCustom = v.findViewById<RadioButton>(R.id.rb_amap_custom)
         val rbOfficial = v.findViewById<RadioButton>(R.id.rb_amap_official)
@@ -443,14 +479,28 @@ class SettingFragment : Fragment() {
 
     private fun showNotifManageDialog() {
         val scroll = ScrollView(requireContext())
-        val layout = LinearLayout(requireContext()).apply { orientation = LinearLayout.VERTICAL; setPadding(64, 40, 64, 40) }
+        val layout = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(64, 40, 64, 40)
+        }
         scroll.addView(layout)
 
         fun createIn(label: String, hint: String, current: String): EditText {
-            layout.addView(TextView(requireContext()).apply { text = label; setTextColor(Color.GRAY); textSize = 12f })
-            val et = EditText(requireContext()).apply { this.hint = hint; setHintTextColor(Color.LTGRAY); if (current.isNotEmpty()) setText(current); maxLines = 1 }
+            layout.addView(TextView(requireContext()).apply {
+                text = label
+                setTextColor(Color.GRAY)
+                textSize = 12f
+            })
+            val et = EditText(requireContext()).apply {
+                this.hint = hint
+                setHintTextColor(Color.LTGRAY)
+                if (current.isNotEmpty()) setText(current)
+                maxLines = 1
+            }
             layout.addView(et)
-            layout.addView(View(requireContext()).apply { layoutParams = LinearLayout.LayoutParams(1, 40) })
+            layout.addView(View(requireContext()).apply {
+                layoutParams = LinearLayout.LayoutParams(1, 40)
+            })
             return et
         }
 
@@ -460,15 +510,26 @@ class SettingFragment : Fragment() {
         val etMoving = createIn("位移/基站切换状态：", "🚶 移动基站切换中...", UserPrefs.getNotifMoving(requireContext()))
         val etError = createIn("信号盲区/异常状态：", "⚠️ 信号盲区/波动", UserPrefs.getNotifError(requireContext()))
 
-        MaterialAlertDialogBuilder(requireContext()).setTitle("通知横幅管理").setView(scroll).setPositiveButton("确认保存") { _, _ ->
-            UserPrefs.saveNotifTitle(requireContext(), etTitle.text.toString().trim())
-            UserPrefs.saveNotifNormal(requireContext(), etNormal.text.toString().trim())
-            UserPrefs.saveNotifOffline(requireContext(), etOffline.text.toString().trim())
-            UserPrefs.saveNotifMoving(requireContext(), etMoving.text.toString().trim())
-            UserPrefs.saveNotifError(requireContext(), etError.text.toString().trim())
-            requireContext().startService(Intent(requireContext(), LocationService::class.java).apply { action = "ACTION_UPDATE_NOTIF" })
-            Toast.makeText(requireContext(), "已更新", Toast.LENGTH_SHORT).show()
-        }.setNegativeButton("取消", null).show()
+        val etNewMsg = createIn("收到新消息：", "收到一条新消息", UserPrefs.getNotifNewMsg(requireContext()))
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("通知横幅管理")
+            .setView(scroll)
+            .setPositiveButton("确认保存") { _, _ ->
+                UserPrefs.saveNotifTitle(requireContext(), etTitle.text.toString().trim())
+                UserPrefs.saveNotifNormal(requireContext(), etNormal.text.toString().trim())
+                UserPrefs.saveNotifOffline(requireContext(), etOffline.text.toString().trim())
+                UserPrefs.saveNotifMoving(requireContext(), etMoving.text.toString().trim())
+                UserPrefs.saveNotifError(requireContext(), etError.text.toString().trim())
+                UserPrefs.saveNotifNewMsg(requireContext(), etNewMsg.text.toString().trim())
+
+                requireContext().startService(Intent(requireContext(), LocationService::class.java).apply {
+                    action = "ACTION_UPDATE_NOTIF"
+                })
+                Toast.makeText(requireContext(), "已更新配置", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showLocationLogsDialog() {

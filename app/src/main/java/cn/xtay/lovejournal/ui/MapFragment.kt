@@ -85,7 +85,9 @@ class MapFragment : Fragment() {
 
         // 🟢 刷新自己的位置 (强制定点并同步)
         btnRefresh.setOnClickListener {
-            if (checkDevSleepIntercept()) return@setOnClickListener
+            if (checkDevSleepIntercept()) {
+                return@setOnClickListener
+            }
 
             val now = System.currentTimeMillis()
             if (now - lastRefreshTime < 3000) {
@@ -104,7 +106,9 @@ class MapFragment : Fragment() {
 
         // 🟢 探测雷达 (30秒严厉冷却)
         btnLocateTa.setOnClickListener {
-            if (checkDevSleepIntercept()) return@setOnClickListener
+            if (checkDevSleepIntercept()) {
+                return@setOnClickListener
+            }
 
             val partnerId = UserPrefs.getPartnerId(requireContext())
             if (partnerId <= 0) {
@@ -124,9 +128,12 @@ class MapFragment : Fragment() {
                 Toast.makeText(context, "📡 已发射雷达波，正在唤醒对方后台...", Toast.LENGTH_SHORT).show()
                 WebSocketManager.sendMessage("send_to_partner", partnerId, "force_location")
 
+                // 🚀 核心修复：将 4500ms 延长至 15000ms，确保对方高德定位+加密上传完毕
                 view.postDelayed({
-                    if (isAdded) pullPartnerLocation(moveToTa = true)
-                }, 4500)
+                    if (isAdded) {
+                        pullPartnerLocation(moveToTa = true)
+                    }
+                }, 15000)
             } else {
                 Toast.makeText(context, "网络通道未就绪，正在尝试普通拉取...", Toast.LENGTH_SHORT).show()
                 pullPartnerLocation(moveToTa = true)
@@ -137,20 +144,29 @@ class MapFragment : Fragment() {
     }
 
     private fun formatTime(rawTime: String?): String {
-        if (rawTime.isNullOrBlank()) return "刚刚"
-        return try { rawTime.substring(11, 16) } catch (e: Exception) { "刚刚" }
+        if (rawTime.isNullOrBlank()) {
+            return "刚刚"
+        }
+        return try {
+            rawTime.substring(11, 16)
+        } catch (e: Exception) {
+            "刚刚"
+        }
     }
 
-    // 🚀 核心 UI 优化：统一加粗样式，将附加状态（stayMsg）取消换行，平铺到时间右侧
+    // 🚀 核心 UI 优化逻辑
     private fun renderStyledLocation(label: String, address: String?, time: String?, isPartner: Boolean, stayMsg: String? = null): android.text.Spanned {
         val displayTime = formatTime(time)
         val addr = address ?: "位置获取中..."
         val colorMain = if (isPartner) "#FF5252" else "#2196F3"
 
-        // 移除 <br/>，使用 &nbsp;&nbsp; 制造缩进空格，使状态与时间同行显示
-        val stayHtml = if (!stayMsg.isNullOrEmpty()) "&nbsp;&nbsp;<font color='#4CAF50'>☕ $stayMsg</font>" else ""
+        // 状态平铺展示逻辑
+        val stayHtml = if (!stayMsg.isNullOrEmpty()) {
+            "&nbsp;&nbsp;<font color='#4CAF50'>☕ $stayMsg</font>"
+        } else {
+            ""
+        }
 
-        // 双方文字均使用 <b> 标签加粗，统一视觉层级大小
         val htmlSource = """
             <b><font color='$colorMain'>$label</font><font color='$colorMain'>$addr</font></b><br/>
             <small><font color='$colorMain'>● </font><font color='#888888'>更新于 $displayTime</font>$stayHtml</small>
@@ -163,7 +179,7 @@ class MapFragment : Fragment() {
         }
     }
 
-    // 🚀 核心新增：秒读本地高德缓存位置，不耗电、不联网
+    // 🚀 秒读本地高德缓存位置
     private fun showMyCachedLocation() {
         try {
             val client = AMapLocationClient(requireContext().applicationContext)
@@ -173,7 +189,6 @@ class MapFragment : Fragment() {
                 refreshMapMarkers()
                 aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(myPos!!, 16f))
 
-                // 将本地时间戳转换为数据库的日期格式以适配 renderStyledLocation
                 val timeStr = dbDateFormat.format(Date(loc.time))
                 val addr = loc.address ?: "获取缓存地址中"
                 tvMyAddr.text = renderStyledLocation("我的位置：", addr, timeStr, false)
@@ -204,8 +219,12 @@ class MapFragment : Fragment() {
             if (location != null) {
                 if (location.errorCode == 0) {
                     val dbLog = LocationEntity(
-                        latitude = location.latitude, longitude = location.longitude, address = location.address ?: "未知地址",
-                        timestamp = System.currentTimeMillis(), locationType = location.locationType, accuracy = location.accuracy
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        address = location.address ?: "未知地址",
+                        timestamp = System.currentTimeMillis(),
+                        locationType = location.locationType,
+                        accuracy = location.accuracy
                     )
                     lifecycleScope.launch(Dispatchers.IO) {
                         val db = AppDatabase.getDatabase(requireContext())
@@ -221,7 +240,6 @@ class MapFragment : Fragment() {
                     refreshMapMarkers()
                     aMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(myPos!!, 16f))
 
-                    // 更新为刚刚获取的实时时间
                     val timeStr = dbDateFormat.format(Date(System.currentTimeMillis()))
                     tvMyAddr.text = renderStyledLocation("我的位置：", addr, timeStr, false)
 
@@ -230,10 +248,19 @@ class MapFragment : Fragment() {
                         if (uid != -1 && UserPrefs.getPartnerId(requireContext()) > 0) {
                             val deviceId = Settings.Secure.getString(requireContext().contentResolver, Settings.Secure.ANDROID_ID)
                             NetworkClient.getApi(requireContext()).syncAll(
-                                action = "sync_all", userId = uid, deviceId = deviceId, lat = lat, lng = lng, address = addr,
-                                battery = DeviceUtil.getBatteryLevel(requireContext()), netType = DeviceUtil.getNetworkInfo(requireContext()).first,
-                                wifiName = DeviceUtil.getNetworkInfo(requireContext()).second, fgApp = DeviceUtil.getForegroundApp(requireContext()),
-                                micBusy = DeviceUtil.getMicBusyStatus(requireContext()), steps = DeviceUtil.getStepCount(requireContext()), topApps = "[]"
+                                action = "sync_all",
+                                userId = uid,
+                                deviceId = deviceId,
+                                lat = lat,
+                                lng = lng,
+                                address = addr,
+                                battery = DeviceUtil.getBatteryLevel(requireContext()),
+                                netType = DeviceUtil.getNetworkInfo(requireContext()).first,
+                                wifiName = DeviceUtil.getNetworkInfo(requireContext()).second,
+                                fgApp = DeviceUtil.getForegroundApp(requireContext()),
+                                micBusy = DeviceUtil.getMicBusyStatus(requireContext()),
+                                steps = DeviceUtil.getStepCount(requireContext()),
+                                topApps = "[]"
                             ).enqueue(object : Callback<UserResponse> {
                                 override fun onResponse(call: Call<UserResponse>, response: Response<UserResponse>) {
                                     if (response.isSuccessful && response.body()?.status == "success") {
@@ -242,6 +269,7 @@ class MapFragment : Fragment() {
                                         Toast.makeText(context, "⚠️ 该账号已在其他设备登录", Toast.LENGTH_LONG).show()
                                     }
                                 }
+
                                 override fun onFailure(call: Call<UserResponse>, t: Throwable) {
                                     Toast.makeText(context, "网络同步失败", Toast.LENGTH_SHORT).show()
                                 }
@@ -252,8 +280,12 @@ class MapFragment : Fragment() {
                     }
                 } else {
                     val errorLog = LocationEntity(
-                        latitude = 0.0, longitude = 0.0, address = "高德异常: ${location.errorInfo}",
-                        timestamp = System.currentTimeMillis(), locationType = -location.errorCode, accuracy = 0f
+                        latitude = 0.0,
+                        longitude = 0.0,
+                        address = "高德异常: ${location.errorInfo}",
+                        timestamp = System.currentTimeMillis(),
+                        locationType = -location.errorCode,
+                        accuracy = 0f
                     )
                     lifecycleScope.launch(Dispatchers.IO) {
                         val db = AppDatabase.getDatabase(requireContext())
@@ -287,32 +319,41 @@ class MapFragment : Fragment() {
                         var stayMsg: String? = null
                         val deviceData = res.partner_data?.device
 
-                        deviceData?.updated_at?.let { devTimeStr ->
-                            try {
-                                val locTime = dbDateFormat.parse(taLoc.updated_at ?: "")?.time ?: 0L
-                                val devTime = dbDateFormat.parse(devTimeStr)?.time ?: 0L
-                                val nowTime = System.currentTimeMillis()
-                                val diffFromNow = nowTime - devTime
-                                val isOffline = diffFromNow >= 2 * 60 * 60 * 1000L
-                                val isScreenOffStay = diffFromNow >= 1 * 60 * 60 * 1000L
-                                val isWifiAnchored = deviceData.net_type == "WiFi" && !deviceData.wifi_name.isNullOrEmpty()
+                        if (deviceData != null) {
+                            deviceData.updated_at?.let { devTimeStr ->
+                                try {
+                                    val locTime = dbDateFormat.parse(taLoc.updated_at ?: "")?.time ?: 0L
+                                    val devTime = dbDateFormat.parse(devTimeStr)?.time ?: 0L
+                                    val nowTime = System.currentTimeMillis()
+                                    val diffFromNow = nowTime - devTime
 
-                                if (locTime > 0 && devTime > 0) {
-                                    if (isOffline) {
-                                        stayMsg = "⚠️ 疑似离线 (超2小时无数据)"
-                                    } else if (isScreenOffStay) {
-                                        stayMsg = "💤 息屏停留 (设备安静中)"
-                                    } else {
-                                        if (isWifiAnchored) {
-                                            val diffMs = if (devTime > locTime) devTime - locTime else 0L
-                                            val mins = diffMs / (60 * 1000L)
-                                            stayMsg = if (mins <= 1) "刚刚定锚于 ${deviceData.wifi_name}" else "已定锚于 ${deviceData.wifi_name} (${mins}分钟)"
+                                    val isOffline = diffFromNow >= 2 * 60 * 60 * 1000L
+                                    val isScreenOffStay = diffFromNow >= 1 * 60 * 60 * 1000L
+                                    val isWifiAnchored = deviceData.net_type == "WiFi" && !deviceData.wifi_name.isNullOrEmpty()
+
+                                    if (locTime > 0 && devTime > 0) {
+                                        if (isOffline) {
+                                            stayMsg = "⚠️ 疑似离线 (超2小时无数据)"
+                                        } else if (isScreenOffStay) {
+                                            stayMsg = "💤 息屏停留 (设备安静中)"
                                         } else {
-                                            stayMsg = "移动网络在线"
+                                            if (isWifiAnchored) {
+                                                val diffMs = if (devTime > locTime) devTime - locTime else 0L
+                                                val mins = diffMs / (60 * 1000L)
+                                                stayMsg = if (mins <= 1) {
+                                                    "刚刚定锚于 ${deviceData.wifi_name}"
+                                                } else {
+                                                    "已定锚于 ${deviceData.wifi_name} (${mins}分钟)"
+                                                }
+                                            } else {
+                                                stayMsg = "移动网络在线"
+                                            }
                                         }
                                     }
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
                                 }
-                            } catch (e: Exception) { e.printStackTrace() }
+                            }
                         }
 
                         tvPartnerAddr.text = renderStyledLocation("${partnerName}位置：", taLoc.address, taLoc.updated_at, true, stayMsg)
@@ -327,22 +368,36 @@ class MapFragment : Fragment() {
                     }
                 }
             }
+
             override fun onFailure(call: Call<UserResponse>, t: Throwable) {
-                if (moveToTa) Toast.makeText(context, "网络错误，无法拉取对方位置", Toast.LENGTH_SHORT).show()
+                if (moveToTa) {
+                    Toast.makeText(context, "网络错误，无法拉取对方位置", Toast.LENGTH_SHORT).show()
+                }
             }
         })
     }
 
     private fun refreshMapMarkers() {
         aMap?.clear()
-        myPos?.let { drawMarker(it, "我", true) }
-        partnerPos?.let { drawMarker(it, getPartnerName(), false) }
+        myPos?.let {
+            drawMarker(it, "我", true)
+        }
+        partnerPos?.let {
+            drawMarker(it, getPartnerName(), false)
+        }
     }
 
     private fun drawMarker(pos: LatLng, title: String, isMe: Boolean) {
-        aMap?.addMarker(MarkerOptions().position(pos).title(title).icon(
-            BitmapDescriptorFactory.defaultMarker(if (isMe) BitmapDescriptorFactory.HUE_AZURE else BitmapDescriptorFactory.HUE_RED)
-        ))
+        val markerOptions = MarkerOptions()
+        markerOptions.position(pos)
+        markerOptions.title(title)
+        val iconType = if (isMe) {
+            BitmapDescriptorFactory.HUE_AZURE
+        } else {
+            BitmapDescriptorFactory.HUE_RED
+        }
+        markerOptions.icon(BitmapDescriptorFactory.defaultMarker(iconType))
+        aMap?.addMarker(markerOptions)
     }
 
     private fun showPartnerNotSynced() {
@@ -368,13 +423,26 @@ class MapFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
-
-        // 🚀 进页双拉：秒读自己的本地缓存 + 并发获取对方的云端位置
+        // 🚀 进页双拉
         showMyCachedLocation()
         pullPartnerLocation(moveToTa = false)
     }
 
-    override fun onPause() { super.onPause(); mapView.onPause() }
-    override fun onDestroy() { super.onDestroy(); mapView.onDestroy(); locationClient?.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); mapView.onSaveInstanceState(outState) }
+    override fun onPause() {
+        super.onPause()
+        mapView.onPause()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mapView.onDestroy()
+        if (locationClient != null) {
+            locationClient?.onDestroy()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        mapView.onSaveInstanceState(outState)
+    }
 }

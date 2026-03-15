@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_bottom_sheet"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="24dp"
+        android:background="?attr/colorOutlineVariant" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <LinearLayout
+            android:id="@+id/menuImage"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                app:cardCornerRadius="28dp"
+                app:cardElevation="0dp"
+                app:cardBackgroundColor="?attr/colorPrimaryContainer">
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:padding="14dp"
+                    android:src="@android:drawable/ic_menu_gallery"
+                    app:tint="?attr/colorPrimary" />
+            </com.google.android.material.card.MaterialCardView>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="图片" android:textSize="12sp" android:layout_marginTop="8dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/menuVideo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                app:cardCornerRadius="28dp"
+                app:cardElevation="0dp"
+                app:cardBackgroundColor="#E3F2FD">
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:padding="14dp"
+                    android:src="@android:drawable/presence_video_online"
+                    app:tint="#1E88E5" />
+            </com.google.android.material.card.MaterialCardView>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="视频" android:textSize="12sp" android:layout_marginTop="8dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/menuFile"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                app:cardCornerRadius="28dp"
+                app:cardElevation="0dp"
+                app:cardBackgroundColor="#F1F8E9">
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:padding="14dp"
+                    android:src="@android:drawable/ic_menu_save"
+                    app:tint="#43A047" />
+            </com.google.android.material.card.MaterialCardView>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="文件" android:textSize="12sp" android:layout_marginTop="8dp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

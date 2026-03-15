@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginEnd="60dp"
+        android:clipChildren="false"
+        android:clipToPadding="false">
+
+        <TextView
+            android:id="@+id/tvCountdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/bg_countdown"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text="10"
+            android:textColor="?attr/colorOnError"
+            android:backgroundTint="?attr/colorError"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:elevation="2dp"
+            android:translationY="-6dp"
+            android:visibility="gone" />
+
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/layoutContent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="?attr/colorSecondaryContainer"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="0dp"
+                android:minWidth="75dp"
+                app:strokeWidth="0dp">
+
+                <FrameLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
+
+                    <ImageView
+                        android:id="@+id/ivImage"
+                        android:layout_width="220dp"
+                        android:layout_height="wrap_content"
+                        android:adjustViewBounds="true"
+                        android:maxHeight="300dp"
+                        android:scaleType="centerCrop"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvVideoInfo"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom|start"
+                        android:layout_margin="8dp"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="4dp"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:padding="10dp"
+                        android:maxWidth="260dp"
+                        android:gravity="center"           android:layout_gravity="center"    android:textColor="?attr/colorOnSecondaryContainer"
+                        android:textSize="16sp"
+                        android:lineSpacingExtra="4dp" />
+                </FrameLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/layoutMask"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                app:cardBackgroundColor="?attr/colorErrorContainer"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="0dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="20dp"
+                    android:minWidth="120dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔥 阅后即焚"
+                        android:textColor="?attr/colorOnErrorContainer"
+                        android:textStyle="bold"
+                        android:textSize="14sp"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="点击查看(防截图)"
+                        android:textColor="?attr/colorOnErrorContainer"
+                        android:alpha="0.8"
+                        android:textSize="12sp"
+                        android:layout_marginTop="4dp"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:id="@+id/layoutBurned"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_dashed_ash"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:padding="16dp"
+                    android:text="💨 已化为灰烬"
+                    android:textColor="?attr/colorOutline"
+                    android:textSize="14sp"
+                    android:textStyle="italic"/>
+            </LinearLayout>
+
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="4dp"
+            android:paddingHorizontal="4dp">
+
+            <TextView
+                android:id="@+id/tvTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="?attr/colorOutline"
+                android:textSize="11sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/tvBurnFlag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔥 阅后即焚"
+                android:textColor="?attr/colorError"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+
+    </LinearLayout>
+</LinearLayout>

@@ -7,6 +7,7 @@ import android.util.Log
 import cn.xtay.lovejournal.util.UserPrefs
 import okhttp3.*
 import org.json.JSONObject
+import java.lang.Compiler.command
 import java.net.URL
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -71,10 +72,19 @@ object WebSocketManager {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+
                 try {
                     val json = JSONObject(text)
+// 🚀 在这里加一行，打印所有收到的原始消息，看看到底服务器发了什么
+                    android.util.Log.d("RTC_DEBUG", "收到原始消息: $text")
+
                     if (json.optString("action") == "receive_from_partner") {
                         val command = json.optString("command")
+
+
+// ✅ 必须加在这一行之后，command 才是绿色的
+                        android.util.Log.d("RTC_DEBUG", "解析出命令: $command")
+
 
                         // 🚀 优化：兼容强解。不论 data 是 JSONObject 还是普通 String，都能安全提取
                         val dataObj = json.opt("data")
