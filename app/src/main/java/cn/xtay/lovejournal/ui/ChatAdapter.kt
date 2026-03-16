@@ -186,8 +186,10 @@ class ChatAdapter(
         fun bind(msg: ChatEntity) {
             currentMsgId = msg.msgId
 
-            // 🚀 核心修复 3：检测到已被物理销毁/删除（isRead 标志），直接将容器连根拔起，杜绝出现白框框
-            if (msg.isRead) {
+            // 🚀 核心修复：区分“普通删除”与“阅后即焚”的视图表现
+            // 如果是普通消息被删除，或者自己发出的阅后即焚被删除 -> 连根拔起，杜绝白框
+            // 如果是对方发来的阅后即焚被销毁 -> 放行，让下方的逻辑展示虚线框
+            if (msg.isRead && !(msg.isBurn && msg.senderId != currentUserId)) {
                 itemView.visibility = View.GONE
                 itemView.layoutParams = RecyclerView.LayoutParams(0, 0)
                 return
@@ -213,7 +215,6 @@ class ChatAdapter(
 
             layoutContent.setOnClickListener(null)
 
-            // 🚀 核心修复 2：只有对方发来的阅后即焚，才禁用长按菜单。自己发出的依然可以唤起“删除本地记录”
             if (msg.isBurn && msg.senderId != currentUserId) {
                 layoutContent.setOnLongClickListener(null)
             } else {
@@ -399,82 +400,90 @@ class ChatAdapter(
             }
 
             if (msg.isBurn && msg.senderId != currentUserId) {
-                val isRevealed = revealedSet.contains(msg.msgId) || burningEndTimes.containsKey(msg.msgId)
-
-                if (!isRevealed) {
+                // 🚀 找回虚线框：如果该消息已经被销毁（isRead = true），直接展示虚线框，隐藏内容
+                if (msg.isRead) {
                     layoutContent.visibility = View.GONE
-                    layoutMask?.visibility = View.VISIBLE
-                    layoutBurned?.visibility = View.GONE
-                    tvCountdown?.visibility = View.GONE
-
-                    layoutMask?.setOnClickListener {
-                        revealedSet.add(msg.msgId)
-                        onSecureLockChange(true)
-                        notifyItemChanged(adapterPosition)
-                    }
-                } else {
-                    layoutContent.visibility = View.VISIBLE
                     layoutMask?.visibility = View.GONE
-                    layoutBurned?.visibility = View.GONE
+                    layoutBurned?.visibility = View.VISIBLE
+                    tvCountdown?.visibility = View.GONE
+                } else {
+                    val isRevealed = revealedSet.contains(msg.msgId) || burningEndTimes.containsKey(msg.msgId)
 
-                    val isReadyToBurn = msg.msgType == "text" || decFile.exists() || decryptFailedSet.contains(msg.msgId)
+                    if (!isRevealed) {
+                        layoutContent.visibility = View.GONE
+                        layoutMask?.visibility = View.VISIBLE
+                        layoutBurned?.visibility = View.GONE
+                        tvCountdown?.visibility = View.GONE
 
-                    if (!isReadyToBurn) {
-                        tvCountdown?.visibility = View.VISIBLE
-                        tvCountdown?.text = "⏳"
-                    } else {
-                        var endTime = burningEndTimes[msg.msgId]
-
-                        if (endTime == null) {
-                            var burnDurationMs = 15000L
-                            if (msg.msgType == "text") {
-                                burnDurationMs = 10000L
-                            } else if (msg.msgType == "file") {
-                                burnDurationMs = 30000L
-                            } else if (msg.msgType == "video") {
-                                burnDurationMs = 30000L
-                                try {
-                                    val parts = msg.originalName.split("|")
-                                    if (parts.size > 1) {
-                                        val timeParts = parts[1].split(":")
-                                        if (timeParts.size == 2) {
-                                            val min = timeParts[0].toLong()
-                                            val sec = timeParts[1].toLong()
-                                            burnDurationMs = (min * 60 + sec) * 1000L + 15000L
-                                        }
-                                    }
-                                } catch (e: Exception) {}
-                            }
-                            endTime = System.currentTimeMillis() + burnDurationMs
-                            burningEndTimes[msg.msgId] = endTime
+                        layoutMask?.setOnClickListener {
+                            revealedSet.add(msg.msgId)
+                            onSecureLockChange(true)
+                            notifyItemChanged(adapterPosition)
                         }
+                    } else {
+                        layoutContent.visibility = View.VISIBLE
+                        layoutMask?.visibility = View.GONE
+                        layoutBurned?.visibility = View.GONE
 
-                        val remainMs = endTime - System.currentTimeMillis()
-                        if (remainMs > 0) {
+                        val isReadyToBurn = msg.msgType == "text" || decFile.exists() || decryptFailedSet.contains(msg.msgId)
+
+                        if (!isReadyToBurn) {
                             tvCountdown?.visibility = View.VISIBLE
-                            burnJob = adapterScope.launch {
-                                var currentRemain = remainMs
-                                while (currentRemain > 0) {
-                                    tvCountdown?.text = (currentRemain / 1000).toString()
-                                    delay(500)
-                                    currentRemain = endTime - System.currentTimeMillis()
+                            tvCountdown?.text = "⏳"
+                        } else {
+                            var endTime = burningEndTimes[msg.msgId]
+
+                            if (endTime == null) {
+                                var burnDurationMs = 15000L
+                                if (msg.msgType == "text") {
+                                    burnDurationMs = 10000L
+                                } else if (msg.msgType == "file") {
+                                    burnDurationMs = 30000L
+                                } else if (msg.msgType == "video") {
+                                    burnDurationMs = 30000L
+                                    try {
+                                        val parts = msg.originalName.split("|")
+                                        if (parts.size > 1) {
+                                            val timeParts = parts[1].split(":")
+                                            if (timeParts.size == 2) {
+                                                val min = timeParts[0].toLong()
+                                                val sec = timeParts[1].toLong()
+                                                burnDurationMs = (min * 60 + sec) * 1000L + 15000L
+                                            }
+                                        }
+                                    } catch (e: Exception) {}
                                 }
+                                endTime = System.currentTimeMillis() + burnDurationMs
+                                burningEndTimes[msg.msgId] = endTime
+                            }
+
+                            val remainMs = endTime - System.currentTimeMillis()
+                            if (remainMs > 0) {
+                                tvCountdown?.visibility = View.VISIBLE
+                                burnJob = adapterScope.launch {
+                                    var currentRemain = remainMs
+                                    while (currentRemain > 0) {
+                                        tvCountdown?.text = (currentRemain / 1000).toString()
+                                        delay(500)
+                                        currentRemain = endTime - System.currentTimeMillis()
+                                    }
+                                    burningEndTimes.remove(msg.msgId)
+                                    revealedSet.remove(msg.msgId)
+                                    tvCountdown?.visibility = View.GONE
+                                    layoutContent.visibility = View.GONE
+                                    layoutBurned?.visibility = View.VISIBLE
+                                    onSecureLockChange(false)
+                                    onMessageBurned(msg)
+                                }
+                            } else {
                                 burningEndTimes.remove(msg.msgId)
                                 revealedSet.remove(msg.msgId)
-                                tvCountdown?.visibility = View.GONE
                                 layoutContent.visibility = View.GONE
+                                layoutMask?.visibility = View.GONE
                                 layoutBurned?.visibility = View.VISIBLE
                                 onSecureLockChange(false)
                                 onMessageBurned(msg)
                             }
-                        } else {
-                            burningEndTimes.remove(msg.msgId)
-                            revealedSet.remove(msg.msgId)
-                            layoutContent.visibility = View.GONE
-                            layoutMask?.visibility = View.GONE
-                            layoutBurned?.visibility = View.VISIBLE
-                            onSecureLockChange(false)
-                            onMessageBurned(msg)
                         }
                     }
                 }
