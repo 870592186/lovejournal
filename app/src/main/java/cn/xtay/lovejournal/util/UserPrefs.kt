@@ -18,7 +18,7 @@ object UserPrefs {
 
     private const val KEY_USE_CUSTOM_SERVER = "use_custom_server"
     private const val KEY_CUSTOM_SERVER_URL = "custom_server_url"
-    private const val DEFAULT_SERVER = "https://x.xtay.cn/"
+    private const val DEFAULT_SERVER = "https://love.sraiy.com/"
 
     private const val KEY_USE_CUSTOM_AMAP = "use_custom_amap"
     private const val KEY_CUSTOM_AMAP_KEY = "custom_amap_key"

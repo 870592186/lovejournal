@@ -79,7 +79,7 @@ jobs:
           echo "🚀 开始双服务器推送..."
           
           # 推送服务器 A
-          curl -s -X POST "https://x.xtay.cn/love_api/push_update.php" \
+          curl -s -X POST "https://love.sraiy.com/love_api/push_update.php" \
             -d "secret=${{ secrets.OTA_PUSH_SECRET_1 }}" \
             -d "v_code=$VERSION_CODE" \
             -d "v_name=$VERSION_NAME" \

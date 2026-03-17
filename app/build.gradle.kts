@@ -19,8 +19,8 @@ android {
         applicationId = "cn.xtay.lovejournal"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20301
-        versionName = "2.3.1"
+        versionCode = 20400
+        versionName = "2.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -99,7 +99,7 @@ dependencies {
 // 💖 引入 Glide 图片加载库（专门用来丝滑播放 GIF）
     implementation("com.github.bumptech.glide:glide:4.16.0")
 
-
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
 
 }
