@@ -119,6 +119,9 @@ class LocationService : Service() {
     private var lastAccelZ = 0f
     private var lastSensorUpdateTime = 0L
 
+    // 🚀 新增：Pong看门狗时间戳，初始值为当前时间
+    private var lastPongTime: Long = System.currentTimeMillis()
+
     private fun getCurrentBattery(): Int {
         val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
         val mockLevel = prefs.getInt("mock_battery_level", -1)
@@ -243,9 +246,9 @@ class LocationService : Service() {
             val state = prefs.getInt("dev_sleep_state", 0)
 
             when (command) {
-                // 🚀 核心新增：静默接收 Pong 回执，证明连接依然活着，不做多余处理
+                // 🚀 核心新增：静默接收 Pong 回执，证明连接依然活着，重置看门狗时间戳
                 "pong" -> {
-                    // 底层通道畅通无阻，无需进行 UI 操作
+                    lastPongTime = System.currentTimeMillis() // 喂狗，TCP未死
                 }
 
                 // --- 聊天消息逻辑 (保留原貌) ---
@@ -486,24 +489,39 @@ class LocationService : Service() {
         }
     }
 
-    // 🚀 核心重构：双态智能保活 + 断连看门狗
+    // 🚀 核心重构：双态智能保活 + Pong看门狗彻底解决TCP假死
     private val pingRunnable = object : Runnable {
         override fun run() {
             val netInfo = DeviceUtil.getNetworkInfo(this@LocationService).first
 
-            // 🚀 动态心跳策略：WiFi 极其稳健，心跳 3 分钟 (180s) 极致省电；移动数据 NAT 易老化，心跳 45 秒 (45s) 防断开
-            val pingInterval = if (netInfo == "WiFi") 180000L else 45000L
+            // 🚀 心跳时间调优：WiFi 下调至 50s 以防 Nginx 60s 强制掐断，移动数据 40s 防 NAT 老化
+            val pingInterval = if (netInfo == "WiFi") 50000L else 40000L
+            // 🚀 看门狗超时阈值：比心跳间隔多 15 秒宽限期
+            val pongTimeoutThreshold = pingInterval + 15000L
 
             if (WebSocketManager.isConnected) {
-                try {
-                    WebSocketManager.sendRawJson(JSONObject().apply { put("action", "ping") }.toString())
-                } catch (e: Exception) {}
+                // 🚀 核心看门狗逻辑：检查上一次收到 Pong 的时间是否超过了容忍极限
+                if (System.currentTimeMillis() - lastPongTime > pongTimeoutThreshold) {
+                    // 发现 TCP 假死 (半开连接)，主动断开连接
+                    WebSocketManager.disconnect()
+                    val uid = UserPrefs.getUserId(this@LocationService)
+                    if (uid > 0 && netInfo != "无网络") {
+                        WebSocketManager.connect(this@LocationService, uid)
+                        lastPongTime = System.currentTimeMillis() // 重连后重置看门狗
+                    }
+                } else {
+                    // 还在安全时间内，正常发送 Ping
+                    try {
+                        WebSocketManager.sendRawJson(JSONObject().apply { put("action", "ping") }.toString())
+                    } catch (e: Exception) {}
+                }
             } else {
-                // 🚀 断连看门狗：由于没有厂商推送，如果 WebSocket 意外断开，心跳机制会作为“兜底唤醒”强行把连接拉起来
+                // 🚀 断连兜底唤醒
                 if (netInfo != "无网络") {
                     val uid = UserPrefs.getUserId(this@LocationService)
                     if (uid > 0) {
                         WebSocketManager.connect(this@LocationService, uid)
+                        lastPongTime = System.currentTimeMillis() // 重连后重置看门狗
                     }
                 }
             }
@@ -544,6 +562,7 @@ class LocationService : Service() {
             val uid = UserPrefs.getUserId(this@LocationService)
             if (uid > 0 && !WebSocketManager.isConnected) {
                 WebSocketManager.connect(this@LocationService, uid)
+                lastPongTime = System.currentTimeMillis() // 🚀 新增：网络切换重连重置看门狗
             }
 
             StrategyManager.reset()
@@ -713,6 +732,7 @@ class LocationService : Service() {
         val uid = UserPrefs.getUserId(this)
         if (uid > 0) {
             WebSocketManager.connect(this, uid)
+            lastPongTime = System.currentTimeMillis() // 🚀 新增：初始连接重置看门狗
         }
 
         if (isScreenOn) {
@@ -743,6 +763,7 @@ class LocationService : Service() {
             val uid = UserPrefs.getUserId(this)
             if (uid > 0 && !WebSocketManager.isConnected) {
                 WebSocketManager.connect(this, uid)
+                lastPongTime = System.currentTimeMillis() // 🚀 新增：后台兜底重连重置看门狗
             }
 
             StrategyManager.checkAndExecuteRemoteCommand(this) { commandTime ->
