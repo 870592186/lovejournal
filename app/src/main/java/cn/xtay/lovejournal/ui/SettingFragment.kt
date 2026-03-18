@@ -35,6 +35,7 @@ import cn.xtay.lovejournal.net.WebSocketManager
 import cn.xtay.lovejournal.service.LocationService
 import cn.xtay.lovejournal.util.UserPrefs
 import cn.xtay.lovejournal.util.UpdateManager
+import cn.xtay.lovejournal.util.IconStealthManager
 import cn.xtay.lovejournal.widget.CoupleWidgetProvider
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -57,6 +58,7 @@ class SettingFragment : Fragment() {
     private lateinit var cardAccountInfo: MaterialCardView
     private lateinit var btnLogout: Button
     private lateinit var switchHideRecents: MaterialSwitch
+    private lateinit var switchStealthMode: MaterialSwitch // 🚀 新增：伪装开关
     private lateinit var ivWidgetAvatarSetup: ImageView
 
     private val updateManager by lazy { UpdateManager(requireContext()) }
@@ -117,6 +119,98 @@ class SettingFragment : Fragment() {
             applyHideRecents(isChecked)
         }
 
+        // 🚀 新增：潜伏模式开关逻辑
+        val prefs = requireContext().getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+        switchStealthMode.isChecked = prefs.getBoolean("is_stealth_enabled", false)
+        switchStealthMode.setOnCheckedChangeListener { buttonView, isChecked ->
+            if (!buttonView.isPressed) return@setOnCheckedChangeListener // 避免代码改变 isChecked 时触发 dialog
+
+            val title = if (isChecked) "开启潜伏伪装" else "恢复真实身份"
+            val msg = if (isChecked) {
+                "开启后：\n1. 桌面图标和名称将变成“网络优化”\n2. 通知栏提示词将自动替换为网络优化相关文案\n3. App 会短暂闪退一次以刷新桌面图标\n4. 主界面将被隐藏，需长按隐藏页面元素进入"
+            } else {
+                "关闭后：\n1. 恢复“情侣手记”图标\n2. 通知栏文案将重置为默认提示\n3. App 会短暂闪退以刷新桌面"
+            }
+
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(title)
+                .setMessage(msg)
+                .setPositiveButton("确定") { _, _ ->
+                    prefs.edit().putBoolean("is_stealth_enabled", isChecked).apply()
+
+                    // 💡 联动修改通知栏文案
+                    if (isChecked) {
+                        UserPrefs.saveNotifTitle(requireContext(), "Android System")
+                        UserPrefs.saveNotifNormal(requireContext(), "网络优化模式")
+                        UserPrefs.saveNotifOffline(requireContext(), "等待网络连接")
+                        UserPrefs.saveNotifMoving(requireContext(), "网络切换中")
+                        UserPrefs.saveNotifError(requireContext(), "网络异常")
+                        UserPrefs.saveNotifNewMsg(requireContext(), "系统缓存待清理")
+                    } else {
+                        UserPrefs.saveNotifTitle(requireContext(), "情侣手记实时守护中")
+                        UserPrefs.saveNotifNormal(requireContext(), "守护中：网络正常")
+                        UserPrefs.saveNotifOffline(requireContext(), "无网络连接，已暂停后台同步")
+                        UserPrefs.saveNotifMoving(requireContext(), "🚶 移动基站切换中...")
+                        UserPrefs.saveNotifError(requireContext(), "⚠️ 信号盲区/波动")
+                        UserPrefs.saveNotifNewMsg(requireContext(), "收到一条新消息")
+                    }
+
+                    // 刷新服务里的通知
+                    requireContext().startService(Intent(requireContext(), LocationService::class.java).apply {
+                        action = "ACTION_UPDATE_NOTIF"
+                    })
+
+                    Toast.makeText(requireContext(), "正在变身，App即将刷新...", Toast.LENGTH_LONG).show()
+
+                    // 延迟 1 秒执行图标切换，让 Toast 能显示出来
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        IconStealthManager.switchAppIdentity(requireContext(), isChecked)
+                    }, 1000)
+                }
+                .setNegativeButton("取消") { _, _ ->
+                    switchStealthMode.isChecked = !isChecked // 恢复开关状态
+                }
+                .show()
+        }
+
+        // ==========================================
+        // 🚀 新增：折叠面板逻辑区
+        // ==========================================
+
+        // 隐私与性能：折叠逻辑
+        val headerPrivacy = view.findViewById<View>(R.id.header_privacy)
+        val cardPrivacy = view.findViewById<View>(R.id.card_privacy)
+        val ivArrowPrivacy = view.findViewById<ImageView>(R.id.iv_arrow_privacy)
+        cardPrivacy?.visibility = View.GONE
+        ivArrowPrivacy?.rotation = -90f
+        // 绑定点击事件
+        headerPrivacy?.setOnClickListener {
+            // 获取当前卡片的可见性
+            val isExpanded = cardPrivacy?.visibility == View.VISIBLE
+            // 切换可见性
+            cardPrivacy?.visibility = if (isExpanded) View.GONE else View.VISIBLE
+            // 🎬 箭头旋转动画：展开时向下(0度)，收起时向右(-90度)
+            ivArrowPrivacy?.animate()?.rotation(if (isExpanded) -90f else 0f)?.setDuration(250)?.start()
+        }
+
+        // 高级管理：折叠逻辑
+        val headerAdvanced = view.findViewById<View>(R.id.header_advanced)
+        val cardAdvanced = view.findViewById<View>(R.id.card_advanced)
+        val ivArrowAdvanced = view.findViewById<ImageView>(R.id.iv_arrow_advanced)
+
+        // 建议高级管理默认收起，让界面更清爽
+        cardAdvanced?.visibility = View.GONE
+        ivArrowAdvanced?.rotation = -90f // 初始状态为收起状态(向右)
+
+        // 绑定点击事件
+        headerAdvanced?.setOnClickListener {
+            val isExpanded = cardAdvanced?.visibility == View.VISIBLE
+            cardAdvanced?.visibility = if (isExpanded) View.GONE else View.VISIBLE
+            ivArrowAdvanced?.animate()?.rotation(if (isExpanded) -90f else 0f)?.setDuration(250)?.start()
+        }
+
+        // ==========================================
+
         view.findViewById<TextView>(R.id.tv_server_manage).setOnClickListener {
             if (checkDevSleepIntercept()) return@setOnClickListener
             showServerSettingDialog()
@@ -150,6 +244,7 @@ class SettingFragment : Fragment() {
         tvBindPartner = view.findViewById(R.id.tv_bind_partner)
         cardAccountInfo = view.findViewById(R.id.card_account_info)
         switchHideRecents = view.findViewById(R.id.switch_hide_recents)
+        switchStealthMode = view.findViewById(R.id.switch_stealth_mode) // 🚀 初始化伪装开关
         btnLogout = view.findViewById(R.id.btn_logout)
         ivWidgetAvatarSetup = view.findViewById(R.id.iv_widget_avatar_setup)
 
@@ -504,13 +599,13 @@ class SettingFragment : Fragment() {
             return et
         }
 
-        val etTitle = createIn("通知总标题：", "情侣手记实时守护中", UserPrefs.getNotifTitle(requireContext()))
-        val etNormal = createIn("正常运行状态：", "守护中：网络正常", UserPrefs.getNotifNormal(requireContext()))
-        val etOffline = createIn("断网连接状态：", "无网络连接，已暂停后台同步", UserPrefs.getNotifOffline(requireContext()))
-        val etMoving = createIn("位移/基站切换状态：", "🚶 移动基站切换中...", UserPrefs.getNotifMoving(requireContext()))
-        val etError = createIn("信号盲区/异常状态：", "⚠️ 信号盲区/波动", UserPrefs.getNotifError(requireContext()))
+        val etTitle = createIn("通知总标题：", "Android System", UserPrefs.getNotifTitle(requireContext()))
+        val etNormal = createIn("正常运行状态：", "网络优化模式", UserPrefs.getNotifNormal(requireContext()))
+        val etOffline = createIn("断网连接状态：", "等待网络连接", UserPrefs.getNotifOffline(requireContext()))
+        val etMoving = createIn("位移/基站切换状态：", "网络切换中", UserPrefs.getNotifMoving(requireContext()))
+        val etError = createIn("信号盲区/异常状态：", "网络异常", UserPrefs.getNotifError(requireContext()))
 
-        val etNewMsg = createIn("收到新消息：", "收到一条新消息", UserPrefs.getNotifNewMsg(requireContext()))
+        val etNewMsg = createIn("收到新消息：", "系统缓存待清理", UserPrefs.getNotifNewMsg(requireContext()))
 
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("通知横幅管理")

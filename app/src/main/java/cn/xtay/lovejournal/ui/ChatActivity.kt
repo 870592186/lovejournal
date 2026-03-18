@@ -73,7 +73,14 @@ class ChatActivity : AppCompatActivity() {
             }
         }
     }
+    // 🚀 加在 MainActivity.kt 和 ChatActivity.kt 里面
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent) // 刷新当前的 Intent
 
+        // （对于 ChatActivity）如果你有刷新消息列表的方法，可以在这里调用一下
+        // 比如： loadMessages()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 解决输入框遮挡问题

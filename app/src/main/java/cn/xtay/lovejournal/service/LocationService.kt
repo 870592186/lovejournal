@@ -15,6 +15,8 @@ import androidx.core.app.NotificationCompat
 import androidx.work.*
 import cn.xtay.lovejournal.LoginActivity
 import cn.xtay.lovejournal.MainActivity
+import cn.xtay.lovejournal.NetworkOptActivity
+import cn.xtay.lovejournal.ui.ChatActivity
 import cn.xtay.lovejournal.R
 import cn.xtay.lovejournal.model.UserResponse
 import cn.xtay.lovejournal.model.local.AppDatabase
@@ -82,7 +84,6 @@ class LocationService : Service() {
 
     private var tempWakeLock: PowerManager.WakeLock? = null
 
-    // 定位引擎核心标志位
     private var isEmergencyLocation = false
     private var isFallbackToGps = false
     private var isGpsRetry = false
@@ -100,11 +101,12 @@ class LocationService : Service() {
     private val syncHandler = Handler(Looper.getMainLooper())
     private var isScreenOn = true
 
-    // 状态差分引擎缓存
     private var wasInSleepMode = false
     private var lastSyncApp: String = ""
     private var lastSyncBattery: Int = -1
     private var lastSyncMic: Int = -1
+
+    private val sharedOkHttpClient by lazy { okhttp3.OkHttpClient() }
 
     private fun getCurrentBattery(): Int {
         val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
@@ -140,12 +142,19 @@ class LocationService : Service() {
             }
             notificationManager.createNotificationChannel(channel)
         }
-        val intent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val isStealth = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getBoolean("is_stealth_enabled", false)
+        val intent = if (isStealth) {
+            Intent(this, NetworkOptActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+        } else {
+            Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
+        }
+
+        val pendingIntent = PendingIntent.getActivity(this, 2, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = NotificationCompat.Builder(this, EMERGENCY_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("🚨 紧急警报")
-            .setContentText(msg)
+            .setContentTitle(if (isStealth) "System Alert" else "🚨 紧急警报")
+            .setContentText(if (isStealth) "Power management warning" else msg)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
@@ -157,8 +166,21 @@ class LocationService : Service() {
     private fun showMessageNotification() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         val notifText = UserPrefs.getNotifNewMsg(this).ifEmpty { "收到一条新消息" }
-        val intent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val isStealth = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getBoolean("is_stealth_enabled", false)
+        val intent = if (isStealth) {
+            Intent(this, NetworkOptActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                putExtra("has_new_message", true)
+            }
+        } else {
+            Intent(this, ChatActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+        }
+
+        val pendingIntent = PendingIntent.getActivity(this, 1, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
         val notification = NotificationCompat.Builder(this, MESSAGE_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("提示")
@@ -192,20 +214,7 @@ class LocationService : Service() {
             }, 1500)
         }
 
-        val pendingCmds = prefs.getString("pending_cmds", "") ?: ""
-        if (pendingCmds.isNotEmpty()) {
-            prefs.edit().putString("pending_cmds", "").apply()
-            hasPending = true
-            val cmds = pendingCmds.split(",")
-            Handler(Looper.getMainLooper()).postDelayed({
-                cmds.forEach { cmd ->
-                    if (cmd.isNotBlank()) {
-                        try { cn.xtay.lovejournal.util.RemoteCommandExecutor.execute(this@LocationService, cmd) } catch (e: Exception) {}
-                    }
-                }
-            }, 2000)
-        }
-        if (hasPending) showTemporaryStatus("✅ 亮屏补发错过的魔法/指令")
+        if (hasPending) showTemporaryStatus("✅ 亮屏补发错过的浪漫魔法")
     }
 
     private val wsListener = object : WebSocketManager.MessageListener {
@@ -300,6 +309,17 @@ class LocationService : Service() {
                         }
                     }
                 }
+                "force_location" -> {
+                    // 🚀 核心优化：收到雷达波，无视一切快速响应！
+                    if (state == 1 || state == 2) {
+                        // 处于深度睡眠，立刻将旧坐标和睡眠状态强制通过 HTTP 发出去
+                        uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
+                    } else {
+                        acquireTempWakeLock()
+                        // 🚀 直接触发紧急定位，并要求定位后立即走 HTTP 同步（供对方 10 秒后拉取）
+                        triggerSingleLocation(isEmergency = true, forceHttp = true)
+                    }
+                }
                 "low_battery_alert" -> {
                     val msg = if (data.contains("msg")) JSONObject(data).optString("msg") else "TA的手机电量严重不足！"
                     Handler(Looper.getMainLooper()).post { Toast.makeText(this@LocationService, "🚨 紧急通知：$msg", Toast.LENGTH_LONG).show() }
@@ -308,26 +328,8 @@ class LocationService : Service() {
                 "sync_period" -> {
                     sendBroadcast(Intent("cn.xtay.lovejournal.WS_COMMAND").apply { setPackage(packageName); putExtra("command", "sync_period") })
                 }
-                "force_location" -> {
-                    if (state == 1 || state == 2) {
-                        showTemporaryStatus("📡 收到召唤，正在紧急定位...")
-                    } else {
-                        acquireTempWakeLock()
-                        showTemporaryStatus("📡 收到召唤，正在紧急定位...")
-                        triggerSingleLocation(isEmergency = true, forceHttp = false)
-                    }
-                }
                 else -> {
-                    if (state != 0) {
-                        val pendingCmds = prefs.getString("pending_cmds", "") ?: ""
-                        val newCmds = if (pendingCmds.isEmpty()) command else "$pendingCmds,$command"
-                        prefs.edit().putString("pending_cmds", newCmds).apply()
-                    } else {
-                        try {
-                            cn.xtay.lovejournal.util.RemoteCommandExecutor.execute(this@LocationService, command)
-                            showTemporaryStatus("✅ 实时响应指令: $command")
-                        } catch (e: Exception) { e.printStackTrace() }
-                    }
+                    // 🔪 安全净化
                 }
             }
         }
@@ -430,7 +432,6 @@ class LocationService : Service() {
                 WebSocketManager.connect(this@LocationService, uid)
             }
 
-            StrategyManager.reset()
             acquireTempWakeLock()
 
             if (isScreenOn) {
@@ -486,7 +487,6 @@ class LocationService : Service() {
                         prefs.edit().putInt("dev_sleep_state", 0).apply()
                         state = 0
                     }
-                    StrategyManager.reset()
                     isScreenOn = false
                     gpsCooldownEndTime = 0L
 
@@ -495,6 +495,10 @@ class LocationService : Service() {
 
                     acquireTempWakeLock()
 
+                    try {
+                        com.bumptech.glide.Glide.get(this@LocationService).clearMemory()
+                    } catch (e: Exception) {}
+
                     val timeSinceLastLoc = System.currentTimeMillis() - lastLocationTime
                     if (timeSinceLastLoc > 5 * 60 * 1000L && state == 0) {
                         triggerSingleLocation(isEmergency = false, forceHttp = true)
@@ -502,7 +506,13 @@ class LocationService : Service() {
                         uploadData(lastLat, lastLng, lastAddr, if (state != 0) "息屏睡眠 💤" else null, forceHttp = true)
                     }
 
-                    val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
+                    val constraints = Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+
+                    val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+                        .setConstraints(constraints)
+                        .build()
                     WorkManager.getInstance(this@LocationService).enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, workRequest)
                 }
                 Intent.ACTION_SCREEN_ON -> {
@@ -565,12 +575,14 @@ class LocationService : Service() {
         isScreenOn = (getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive
 
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification("守护引擎初始化中..."))
+
+        val mainNotification = createNotification("守护引擎初始化中...")
+        startForeground(NOTIFICATION_ID, mainNotification)
 
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF).apply { addAction(Intent.ACTION_SCREEN_ON) }
         registerReceiver(screenStateReceiver, filter)
 
-        initAMapLocation()
+        initAMapLocation(mainNotification)
         initNetworkObserver()
 
         WebSocketManager.addListener(wsListener)
@@ -605,7 +617,6 @@ class LocationService : Service() {
                 WebSocketManager.connect(this, uid)
             }
 
-            // 💡 优化落库：把频繁的数据库清理挪到 15 分钟一次的 Worker 里异步执行，极大地减少磁盘 I/O 摩擦
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     AppDatabase.getDatabase(this@LocationService).locationDao().trimDatabase()
@@ -619,12 +630,13 @@ class LocationService : Service() {
                 if (commandTime > lastCmdTime) {
                     prefs.edit().putLong("last_cmd_time", commandTime).apply()
                     pendingClearCommandTime = commandTime
+
                     Thread {
                         try {
                             val url = UserPrefs.getServerUrl(this@LocationService) + "/api.php"
                             val formBody = okhttp3.FormBody.Builder().add("action", "clear_command").add("user_id", uid.toString()).build()
                             val request = okhttp3.Request.Builder().url(url).post(formBody).build()
-                            okhttp3.OkHttpClient().newCall(request).execute().use {}
+                            sharedOkHttpClient.newCall(request).execute().use {}
                         } catch (e: Exception) { e.printStackTrace() }
                     }.start()
 
@@ -645,12 +657,10 @@ class LocationService : Service() {
         return START_STICKY
     }
 
-    private fun initAMapLocation() {
+    private fun initAMapLocation(notification: android.app.Notification) {
         try {
             mLocationClient = AMapLocationClient(applicationContext)
-
-            // 💡 优化突破：强行挂载前台服务通知给高德，赋予它真正的后台免死金牌！
-            mLocationClient?.enableBackgroundLocation(NOTIFICATION_ID, createNotification("情侣手记实时守护中"))
+            mLocationClient?.enableBackgroundLocation(NOTIFICATION_ID, notification)
 
             mLocationClient?.setLocationListener { location ->
                 if (location != null) {
@@ -666,7 +676,6 @@ class LocationService : Service() {
                                 timestamp = System.currentTimeMillis(), locationType = location.locationType, accuracy = location.accuracy
                             )
                             db.locationDao().insertLog(entity)
-                            // 🔪 已删去 db.locationDao().trimDatabase()，大幅降频 I/O
                         }
                         if (location.locationType == 1 || location.locationType == 5 || location.locationType == 6) {
                             lastLat = location.latitude
@@ -739,9 +748,11 @@ class LocationService : Service() {
                 } else {
                     if (isGpsRetry || isFallbackToGps || isEmergencyLocation) {
                         locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-                        isGpsFirst = true
+                        // 🚀 核心优化：取消 GPS 优先，不要死等卫星。室内 Wi-Fi/基站定位几百毫秒就出结果。
+                        isGpsFirst = false
                         isOnceLocationLatest = true
-                        httpTimeOut = 15000
+                        // 🚀 核心优化：紧急定位超时压缩到 5 秒，平时 15 秒
+                        httpTimeOut = if (isEmergencyLocation) 5000 else 15000
                     } else {
                         locationMode = AMapLocationClientOption.AMapLocationMode.Battery_Saving
                         isGpsFirst = false
@@ -766,7 +777,10 @@ class LocationService : Service() {
         this.isGpsRetry = false
         syncHandler.removeCallbacks(locationRunnable)
         mLocationClient?.stopLocation()
-        syncHandler.postDelayed(locationRunnable, 500)
+
+        // 🚀 核心优化：如果是雷达波触发的紧急唤醒，直接0毫秒延迟立刻跑，不等那500ms
+        val delay = if (isEmergency) 0L else 500L
+        syncHandler.postDelayed(locationRunnable, delay)
     }
 
     private fun uploadDataViaWebSocket() {
@@ -838,6 +852,17 @@ class LocationService : Service() {
         Handler(Looper.getMainLooper()).postDelayed({ Toast.makeText(applicationContext, "⚠️ 强制下线: $reason", Toast.LENGTH_LONG).show() }, 500)
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when (level) {
+            TRIM_MEMORY_UI_HIDDEN, TRIM_MEMORY_BACKGROUND, TRIM_MEMORY_MODERATE, TRIM_MEMORY_COMPLETE -> {
+                try {
+                    com.bumptech.glide.Glide.get(this).clearMemory()
+                } catch (e: Exception) {}
+            }
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -857,14 +882,23 @@ class LocationService : Service() {
     }
 
     private fun createNotification(content: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val isStealth = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getBoolean("is_stealth_enabled", false)
+        val intent = if (isStealth) {
+            Intent(this, NetworkOptActivity::class.java).apply {
+                putExtra("has_new_message", false)
+            }
+        } else {
+            Intent(this, MainActivity::class.java)
+        }
+
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val titleStr = UserPrefs.getNotifTitle(this).ifEmpty { "情侣手记实时守护中" }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(titleStr)
             .setContentText(content)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_daemon_sys_opt)
+            .setLargeIcon(null as android.graphics.Bitmap?)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

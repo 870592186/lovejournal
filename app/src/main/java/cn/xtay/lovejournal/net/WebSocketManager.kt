@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import cn.xtay.lovejournal.util.DeviceUtil
 import cn.xtay.lovejournal.util.UserPrefs
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
@@ -18,6 +19,12 @@ object WebSocketManager {
     private var appContext: Context? = null
     var isConnected = false
         private set
+
+    // 💡 刺客一修复：增加极度严格的防并发锁，拒绝重复触发僵尸线程
+    private var isConnecting = false
+
+    private var currentKeepAlive = 270
+    private var lastHeartbeatResetTime = 0L
 
     interface MessageListener {
         fun onCommandReceived(command: String, data: String)
@@ -48,9 +55,12 @@ object WebSocketManager {
     }
 
     fun connect(context: Context, userId: Int) {
-        if (isConnected || userId <= 0) return
+        // 🛡️ 防御锁：如果已经连上、或者正在连接中，立刻打回，绝不并发！
+        if (isConnected || isConnecting || userId <= 0) return
+
         appContext = context.applicationContext
         currentUserId = userId
+        isConnecting = true // 上锁
 
         val brokerUrl = getMqttBrokerUrl(context)
         val clientId = "user_$userId"
@@ -60,10 +70,15 @@ object WebSocketManager {
                 mqttClient = MqttAsyncClient(brokerUrl, clientId, MemoryPersistence())
             }
 
+            val now = System.currentTimeMillis()
+            if (now - lastHeartbeatResetTime > 2 * 60 * 60 * 1000L) {
+                currentKeepAlive = 270
+                lastHeartbeatResetTime = now
+            }
+
             val options = MqttConnectOptions().apply {
                 isCleanSession = false
-                // 💡 极其省电的 4.5 分钟长心跳：给 Doze 休眠留足空间，防止频繁唤醒基带耗电
-                keepAliveInterval = 270
+                keepAliveInterval = currentKeepAlive
                 isAutomaticReconnect = false
                 connectionTimeout = 10
             }
@@ -71,7 +86,7 @@ object WebSocketManager {
             mqttClient?.setCallback(object : MqttCallbackExtended {
                 override fun connectComplete(reconnect: Boolean, serverURI: String?) {
                     isConnected = true
-                    Log.d("RTC_DEBUG", "🚀 MQTT 引擎连接成功! 是否为断线自动重连: $reconnect")
+                    Log.d("RTC_DEBUG", "🚀 MQTT 引擎连接成功! 当前采用心跳: ${currentKeepAlive}s")
 
                     val myTopic = "lovejournal/down/$userId"
                     try {
@@ -87,21 +102,27 @@ object WebSocketManager {
 
                 override fun connectionLost(cause: Throwable?) {
                     isConnected = false
-                    Log.e("RTC_DEBUG", "💔 MQTT 底层连接断开，即将自动重连: ${cause?.message}")
+                    Log.e("RTC_DEBUG", "💔 MQTT 底层连接断开: ${cause?.message}")
+
+                    appContext?.let { ctx ->
+                        val netInfo = DeviceUtil.getNetworkInfo(ctx).first
+                        if (netInfo != "无网络") {
+                            if (currentKeepAlive > 60) {
+                                currentKeepAlive -= 30
+                                if (currentKeepAlive < 60) currentKeepAlive = 60
+                            }
+                        }
+                    }
                 }
 
                 override fun messageArrived(topic: String?, message: MqttMessage?) {
                     val text = message?.payload?.let { String(it) } ?: return
-                    Log.d("RTC_DEBUG", "📥 收到 MQTT 原始消息 [$topic]: $text")
-
                     try {
                         val json = JSONObject(text)
                         val action = json.optString("action")
 
                         if (action == "receive_from_partner") {
                             val command = json.optString("command")
-                            Log.d("RTC_DEBUG", "✅ 解析出业务命令: $command")
-
                             val dataObj = json.opt("data")
                             val dataString = dataObj?.toString() ?: ""
 
@@ -120,9 +141,23 @@ object WebSocketManager {
                 override fun deliveryComplete(token: IMqttDeliveryToken?) {}
             })
 
-            mqttClient?.connect(options)
+            // 💡 刺客一终极绝杀：注入底层监听器，一旦连接失败，就地正法！
+            mqttClient?.connect(options, null, object : IMqttActionListener {
+                override fun onSuccess(asyncActionToken: IMqttToken?) {
+                    isConnecting = false // 成功后解锁
+                }
+
+                override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
+                    isConnecting = false // 失败后解锁
+                    Log.e("RTC_DEBUG", "💥 物理连接彻底失败，触发防死循环强制清理: ${exception?.message}")
+                    // 强行阻断可能挂起的后台发包线程，根除 CPU 100% 死循环！
+                    try { mqttClient?.disconnectForcibly(100, 100) } catch (e: Exception) {}
+                    mqttClient = null
+                }
+            })
 
         } catch (e: Exception) {
+            isConnecting = false // 异常解锁
             e.printStackTrace()
         }
     }
@@ -146,7 +181,6 @@ object WebSocketManager {
                 qos = 1
             }
             mqttClient?.publish(topic, message)
-            Log.d("RTC_DEBUG", "📤 向上行主题发布: $jsonString")
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -154,7 +188,7 @@ object WebSocketManager {
 
     fun disconnect() {
         try {
-            // 依然保留强杀手段，防止极端情况下的线程暴走
+            isConnecting = false
             mqttClient?.disconnectForcibly(1000, 1000)
         } catch (e: Exception) {
             e.printStackTrace()

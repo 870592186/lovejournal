@@ -2,34 +2,49 @@ package cn.xtay.lovejournal.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.os.Build
 import android.view.accessibility.AccessibilityEvent
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import java.lang.ref.WeakReference
 
 class KeepAliveAccessibilityService : AccessibilityService() {
 
     companion object {
-        // 💖 关键修复：定义单例，让 RemoteCommandExecutor 能找到它
-        var instance: KeepAliveAccessibilityService? = null
+        // 💖 终极优化：使用弱引用 (WeakReference) 包裹 Context，彻底消灭内存泄漏隐患！
+        private var instanceRef: WeakReference<KeepAliveAccessibilityService>? = null
+
+        // 供外部获取实例的安全通道
+        val instance: KeepAliveAccessibilityService?
+            get() = instanceRef?.get()
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        instance = this // 💖 绑定实例
+        instanceRef = WeakReference(this) // 💖 安全绑定
 
         // 💖 原有功能：当机主开启无障碍时，确保核心服务被拉起
         try {
             val intent = Intent(this, LocationService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
             } else {
                 startService(intent)
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            // 💖 终极防线补齐：无障碍服务也可能遭遇 Android 12+ 的后台启动限制，上 WorkManager 兜底！
+            try {
+                val reviveRequest = OneTimeWorkRequestBuilder<SyncWorker>().build()
+                WorkManager.getInstance(this).enqueue(reviveRequest)
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
         }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 彻底静默，不消耗任何 CPU 资源
+        // 彻底静默，不消耗任何 Kotlin 层的 CPU 资源
     }
 
     override fun onInterrupt() {
@@ -38,7 +53,9 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        instance = null // 💖 销毁时清理引用，防止内存泄漏
+        // 💖 销毁时安全清理，滴水不漏
+        instanceRef?.clear()
+        instanceRef = null
     }
 
     /**

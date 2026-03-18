@@ -195,7 +195,7 @@ class LoginActivity : AppCompatActivity() {
         layout.addView(etCode)
 
         val dialog = MaterialAlertDialogBuilder(this).setTitle("心动连接").setView(layout).setCancelable(false)
-            .setPositiveButton("立即绑定", null).setNegativeButton("稍后跳过") { _, _ -> gotoMain() }.show()
+            .setPositiveButton("立即绑定", null).setNegativeButton("暂时跳过") { _, _ -> gotoMain() }.show()
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val nickname = etNickname.text.toString().trim()

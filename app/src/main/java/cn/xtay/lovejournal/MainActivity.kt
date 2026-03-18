@@ -102,6 +102,15 @@ class MainActivity : AppCompatActivity() {
         // 🗑️ 已彻底删除了容易引发崩溃的 OTA 广播注册
     }
 
+    // 🚀 加在 MainActivity.kt 和 ChatActivity.kt 里面
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent) // 刷新当前的 Intent
+
+        // （对于 ChatActivity）如果你有刷新消息列表的方法，可以在这里调用一下
+        // 比如： loadMessages()
+    }
+
     override fun onResume() {
         super.onResume()
 

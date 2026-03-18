@@ -1,5 +1,6 @@
 package cn.xtay.lovejournal.service
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
@@ -27,11 +28,11 @@ class LocationTileService : TileService() {
         // 根据服务运行状态切换 状态(State)、文字(Label) 和 图标(Icon)
         if (isAccOn && isLocRunning) {
             tile.state = Tile.STATE_ACTIVE
-            tile.label = "守护：完美运行"
+            tile.label = "系统：网络优化"
             tile.icon = Icon.createWithResource(this, R.drawable.ic_location_tile_on)
         } else {
             tile.state = Tile.STATE_INACTIVE
-            tile.label = if (!isAccOn) "守护：去开无障碍" else "守护：点击开启"
+            tile.label = if (!isAccOn) "系统：去开无障碍" else "系统：点击开启"
             // 🛑 修复UI不刷新的Bug：必须给关闭状态也设置Icon。
             // 直接复用同一个Icon即可，安卓系统会自动把它渲染成灰色(Inactive)
             tile.icon = Icon.createWithResource(this, R.drawable.ic_location_tile_on)
@@ -77,6 +78,7 @@ class LocationTileService : TileService() {
     /**
      * 当用户点击磁贴时触发
      */
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
 

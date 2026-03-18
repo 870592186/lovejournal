@@ -21,54 +21,16 @@ class ExternalCommandReceiver : BroadcastReceiver() {
         // 获取具体指令
         val command = intent.getStringExtra("cmd") ?: return
 
+        // 🛡️ 安全净化：只保留发射爱心的功能，干掉所有可能被杀毒软件误判为后门的控制指令
         when (command) {
-            "toggle_sleep" -> handleToggleSleep(context)
-            "enable_sleep" -> setSleepState(context, 1)
-            "disable_sleep" -> setSleepState(context, 0)
             "fly_heart" -> handleFlyHeart(context)
-            // 🚀 新增：无损电量调试接口
-            "mock_battery" -> {
-                // 兼容 int 和 string 两种传参方式，默认为 -1（代表恢复真实电量）
-                var level = intent.getIntExtra("level", -1)
-                if (level == -1) {
-                    level = intent.getStringExtra("level")?.toIntOrNull() ?: -1
-                }
-                setMockBattery(context, level)
+            else -> {
+                // 收到其他指令一律静默丢弃，绝不执行任何静默修改操作
             }
         }
     }
 
-    // 🚀 新增：处理无损电量调试
-    private fun setMockBattery(context: Context, level: Int) {
-        val prefs = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putInt("mock_battery_level", level).apply()
-
-        if (level == -1) {
-            Toast.makeText(context, "✅ 已恢复读取真实物理电量", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "🧪 调试模式：全局电量已被锁死为 $level%", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // 处理：一键切换伪装模式
-    private fun handleToggleSleep(context: Context) {
-        val prefs = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
-        val currentState = prefs.getInt("dev_sleep_state", 0)
-        val newState = if (currentState == 0) 1 else 0
-        setSleepState(context, newState)
-    }
-
-    // 设置伪装模式状态
-    private fun setSleepState(context: Context, state: Int) {
-        val prefs = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putInt("dev_sleep_state", state).apply()
-
-        val msg = if (state == 0) "✅ 伪装模式已关闭" else "💤 伪装模式已开启"
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-        // 注意：这里不需要手动上传！LocationService 里的 3秒雷达会自动发现 SharedPreferences 的变化并秒发给服务器！
-    }
-
-    // 处理：一键发射爱心
+    // 处理：一键发射爱心（安全白名单功能，完全保留）
     private fun handleFlyHeart(context: Context) {
         val partnerId = UserPrefs.getPartnerId(context)
         if (partnerId <= 0) {
@@ -85,10 +47,10 @@ class ExternalCommandReceiver : BroadcastReceiver() {
             val uid = UserPrefs.getUserId(context)
             NetworkClient.getApi(context).sendCommand(
                 action = "send_command",
-                userId = uid,               // 👈 极有可能是之前少传了这个参数！
+                userId = uid,
                 partnerId = partnerId,
                 command = "fly_heart",
-                time = (System.currentTimeMillis() / 1000).toLong() // 或者 .toInt()
+                time = (System.currentTimeMillis() / 1000).toLong()
             ).enqueue(object : Callback<cn.xtay.lovejournal.model.UserResponse> {
                 override fun onResponse(call: Call<cn.xtay.lovejournal.model.UserResponse>, response: Response<cn.xtay.lovejournal.model.UserResponse>) {
                     Toast.makeText(context, "💖 浪漫魔法已发射(云端)", Toast.LENGTH_SHORT).show()

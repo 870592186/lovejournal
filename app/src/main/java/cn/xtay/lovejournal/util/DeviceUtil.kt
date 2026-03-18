@@ -33,6 +33,7 @@ object DeviceUtil {
                 override fun onSensorChanged(event: SensorEvent?) {
                     if (event != null && event.values.isNotEmpty()) {
                         rawStepCount = event.values[0].toInt()
+                        // 拿到最新数据后立刻注销，防止传感器持续耗电
                         sensorManager.unregisterListener(this)
                     }
                 }
@@ -41,6 +42,8 @@ object DeviceUtil {
             sensorManager.registerListener(listener, stepSensor, SensorManager.SENSOR_DELAY_FASTEST)
         }
 
+        // ⚠️ 注：由于传感器回调是异步的，本次 return 的大概率是内存里缓存的上一次的 rawStepCount。
+        // 这在每 10 秒轮询的架构下是完全可接受的“一帧延迟”。
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
         val savedDay = UserPrefs.getStepDay(context)
         var baseline = UserPrefs.getStepBaseline(context)
@@ -82,7 +85,7 @@ object DeviceUtil {
     }
 
     /**
-     * 🚀 纯净版实时前台探测：彻底摒弃 ActivityManager 陷阱，全靠物理事件流
+     * 🚀 纯净版实时前台探测：基于 UsageStatsManager 事件流
      */
     fun getForegroundApp(context: Context): String {
         // 1. 息屏/伪装拦截
@@ -94,7 +97,9 @@ object DeviceUtil {
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val pm = context.packageManager
         val endTime = System.currentTimeMillis()
-        val startTime = endTime - 1000 * 60 * 5 // 5分钟大窗口
+
+        // 💡 性能优化：10秒轮询一次，时间窗口最多查过去 1 分钟足矣，极大减少系统遍历负担
+        val startTime = endTime - 1000 * 60 * 1
 
         var lastResumedPkg = ""
 
@@ -134,6 +139,7 @@ object DeviceUtil {
             val label = pm.getApplicationLabel(info).toString()
             if (label.contains("桌面")) "桌面" else label
         } catch (e: Exception) {
+            // 包名解析失败（比如应用刚被卸载等极端情况），返回包名后缀
             lastResumedPkg.split(".").last()
         }
     }

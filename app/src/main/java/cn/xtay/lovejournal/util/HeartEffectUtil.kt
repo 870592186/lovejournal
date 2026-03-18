@@ -48,8 +48,19 @@ object HeartEffectUtil {
             }
 
             windowManager.addView(heartView, params)
+
             Handler(Looper.getMainLooper()).postDelayed({
-                try { windowManager.removeView(heartView) } catch (e: Exception) { e.printStackTrace() }
+                try {
+                    // 💡 绝杀 CPU 满载的真凶：在移除悬浮窗前，必须强行停止 Glide 的 GIF 渲染引擎！
+                    Glide.with(context).clear(heartView)
+                    // 彻底清空内存中的图像残留，防止任何内存泄漏
+                    heartView.setImageDrawable(null)
+
+                    // 最后再安全地移除幽灵 View
+                    windowManager.removeView(heartView)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }, 6000)
 
         } catch (e: Exception) {

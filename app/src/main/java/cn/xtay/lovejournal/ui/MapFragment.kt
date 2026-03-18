@@ -128,12 +128,12 @@ class MapFragment : Fragment() {
                 Toast.makeText(context, "📡 已发射雷达波，正在唤醒对方后台...", Toast.LENGTH_SHORT).show()
                 WebSocketManager.sendMessage("send_to_partner", partnerId, "force_location")
 
-                // 🚀 核心修复：将 4500ms 延长至 15000ms，确保对方高德定位+加密上传完毕
+                // 🚀 核心优化：高德不强制等卫星后，速度极快，这里改回 10 秒拉取即可
                 view.postDelayed({
                     if (isAdded) {
                         pullPartnerLocation(moveToTa = true)
                     }
-                }, 15000)
+                }, 10000)
             } else {
                 Toast.makeText(context, "网络通道未就绪，正在尝试普通拉取...", Toast.LENGTH_SHORT).show()
                 pullPartnerLocation(moveToTa = true)
