@@ -311,10 +311,13 @@ class LocationService : Service() {
                     }
                 }
                 "force_location" -> {
-                    // 🚀 核心改动：只要长连接收到指令，说明线路通畅，无视状态直接拉起紧急定位响应！
-                    // （如果长连接断了，服务端会自己回复“对方已休眠”，客户端根本收不到这个指令）
                     acquireTempWakeLock()
-                    triggerSingleLocation(isEmergency = true, forceHttp = true)
+                    // 🚀 终极死守伪装：即使收到强拉指令，只要伪装未解除，绝对不定位，只推旧坐标！
+                    if (state != 0) {
+                        uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
+                    } else {
+                        triggerSingleLocation(isEmergency = true, forceHttp = true)
+                    }
                 }
                 "low_battery_alert" -> {
                     val msg = if (data.contains("msg")) JSONObject(data).optString("msg") else "TA的手机电量严重不足！"
@@ -346,9 +349,10 @@ class LocationService : Service() {
             val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
             val state = prefs.getInt("dev_sleep_state", 0)
 
+            // 🚀 自动解除伪装的时间：早上 7 点到 中午 12 点
             if (state == 1 || state == 2) {
                 val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-                if (hour in 8..12) prefs.edit().putInt("dev_sleep_state", 0).apply()
+                if (hour in 7..12) prefs.edit().putInt("dev_sleep_state", 0).apply()
             }
 
             val finalState = prefs.getInt("dev_sleep_state", 0)
@@ -390,6 +394,7 @@ class LocationService : Service() {
     private val periodicLocationRunnable = object : Runnable {
         override fun run() {
             val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            // 只有正常状态下才定时巡逻
             if (state == 0 && isScreenOn) {
                 val netInfo = DeviceUtil.getNetworkInfo(this@LocationService).first
                 if (netInfo != "无网络") triggerSingleLocation(isEmergency = false, forceHttp = false)
@@ -449,6 +454,7 @@ class LocationService : Service() {
                 wifiDebounceRunnable = Runnable { triggerSingleLocation(isEmergency = false, forceHttp = true) }
                 syncHandler.postDelayed(wifiDebounceRunnable!!, 3000L)
             } else {
+                // 伪装状态：即便切网了，也只推缓存死地址
                 uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
             }
             val defaultNorm = UserPrefs.getNotifNormal(this@LocationService).ifEmpty { "守护中：网络正常" }
@@ -499,10 +505,10 @@ class LocationService : Service() {
                     if (timeSinceLastLoc > 5 * 60 * 1000L && state == 0) {
                         triggerSingleLocation(isEmergency = false, forceHttp = true)
                     } else {
+                        // 伪装状态：不管离上次多久，统统推缓存旧坐标
                         uploadData(lastLat, lastLng, lastAddr, if (state != 0) "息屏睡眠 💤" else null, forceHttp = true)
                     }
 
-                    // 🚀 核心逻辑统一：息屏后必然挂载系统窗口 (WorkManager)
                     val constraints = Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
                         .build()
@@ -608,9 +614,13 @@ class LocationService : Service() {
         }
 
         if (intent?.action == "ACTION_WAKEUP_FROM_GHOST") {
-            // 虽然放弃了 ADB 特权，但如果有极端的防断网唤醒手段（如企业微信），依然允许拉起单次紧急定位
             acquireTempWakeLock(15000L)
-            triggerSingleLocation(isEmergency = true, forceHttp = true)
+            val currentState = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            if (currentState != 0) {
+                uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
+            } else {
+                triggerSingleLocation(isEmergency = true, forceHttp = true)
+            }
             return START_STICKY
         }
 
@@ -648,9 +658,13 @@ class LocationService : Service() {
                 }
             }
 
-            // 🚀 核心：当系统窗口（WorkManager）被调度时，我们强制执行一次真正的高精度定位并上报！
-            triggerSingleLocation(isEmergency = true, forceHttp = true)
-
+            // 🚀 核心：当系统窗口调起时，若是处于伪装模式，直接拒绝新定位！只发缓存图个清静。
+            val currentState = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
+            if (currentState == 0) {
+                triggerSingleLocation(isEmergency = true, forceHttp = true)
+            } else {
+                uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
+            }
         }
         return START_STICKY
     }
@@ -692,7 +706,6 @@ class LocationService : Service() {
                         val useHttp = pendingHttpSyncOnLocation
                         pendingHttpSyncOnLocation = false
 
-                        // 无论如何唤醒的，只要在息屏伪装状态，必定带上“息屏睡眠”标志
                         if (currentState != 0) {
                             uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = useHttp)
                         } else {
@@ -733,8 +746,8 @@ class LocationService : Service() {
         val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
         val state = prefs.getInt("dev_sleep_state", 0)
 
-        // 🚀 简化拦截逻辑：如果处于睡眠状态，【仅允许】通过 isEmergency=true 的紧急请求（来自长连接或系统窗口）
-        if (state != 0 && !isEmergencyLocation) {
+        // 🚀 终极伪装死守：只要在睡眠状态，直接拦截硬件定位，绝对不允许唤醒 GPS！
+        if (state != 0) {
             isEmergencyLocation = false
             isGpsRetry = false
             return@Runnable
@@ -776,8 +789,8 @@ class LocationService : Service() {
         val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
         val state = prefs.getInt("dev_sleep_state", 0)
 
-        // 🚀 简化拦截逻辑：同上，睡眠状态下仅放行紧急调用
-        if (state != 0 && !isEmergency) {
+        // 🚀 终极伪装死守：不再有任何例外。伪装模式下，拦截一切硬件启动！
+        if (state != 0) {
             return
         }
 
@@ -889,6 +902,7 @@ class LocationService : Service() {
         if (tempWakeLock?.isHeld == true) tempWakeLock?.release()
         super.onDestroy()
     }
+
     // 🚀 核心防刺杀机制：监控到用户“划掉卡片”的瞬间
     @SuppressLint("ScheduleExactAlarm")
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -917,6 +931,7 @@ class LocationService : Service() {
             e.printStackTrace()
         }
     }
+
     private fun createNotification(content: String): Notification {
         val isStealth = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getBoolean("is_stealth_enabled", false)
         val intent = if (isStealth) {
