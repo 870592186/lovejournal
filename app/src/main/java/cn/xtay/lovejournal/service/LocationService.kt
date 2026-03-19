@@ -168,11 +168,15 @@ class LocationService : Service() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         val notifText = UserPrefs.getNotifNewMsg(this).ifEmpty { "收到一条新消息" }
 
-        val isStealth = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getBoolean("is_stealth_enabled", false)
-        val intent = if (isStealth) {
+        val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+        val isStealth = prefs.getBoolean("is_stealth_enabled", false)
+        val state = prefs.getInt("dev_sleep_state", 0)
+
+        // 🚀 限制：伪装状态（或隐身模式）下，点击通知绝对不准进入聊天界面！只跳到平淡无奇的网络设置页。
+        val intent = if (isStealth || state != 0) {
             Intent(this, NetworkOptActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                putExtra("has_new_message", true)
+                // 不传入 has_new_message，确保里面无法调出隐藏的聊天入口
             }
         } else {
             Intent(this, ChatActivity::class.java).apply {
@@ -248,14 +252,16 @@ class LocationService : Service() {
                     } catch (e: Exception) { e.printStackTrace() }
                 }
                 "receive_chat_msg" -> {
-                    if (state == 0) showMessageNotification()
+                    // 🚀 正常提醒：无论是否伪装，消息通知照常弹起，但是由于上面的限制，点开无效。
+                    showMessageNotification()
                     CoroutineScope(Dispatchers.IO).launch {
                         saveIncomingMessageToDb(data)
                         withContext(Dispatchers.Main) { sendBroadcast(Intent("cn.xtay.lovejournal.ACTION_CHAT_MSG").setPackage(packageName)) }
                     }
                 }
                 "receive_offline_messages" -> {
-                    if (state == 0) showMessageNotification()
+                    // 🚀 正常提醒：同上
+                    showMessageNotification()
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
                             val array = JSONArray(data)
@@ -297,15 +303,18 @@ class LocationService : Service() {
                     } catch (e: Exception) { e.printStackTrace() }
                 }
                 "fly_heart" -> {
-                    if (state != 0) {
-                        prefs.edit().putBoolean("pending_heart", true).apply()
+                    if (isScreenOn && state == 0) {
+                        cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
+                        showTemporaryStatus("✅ 实时响应浪漫魔法")
                     } else {
-                        if (isScreenOn) {
-                            cn.xtay.lovejournal.util.HeartEffectUtil.showFloatingHeart(this@LocationService)
-                            showTemporaryStatus("✅ 实时响应浪漫魔法")
+                        // 🚀 正常震动：无论是正常息屏还是伪装，照样嗡嗡震动，不留破绽。
+                        prefs.edit().putBoolean("pending_heart", true).apply()
+                        playHeartbeatVibration()
+
+                        if (state != 0) {
+                            // 伪装状态下，只发死坐标回复对方（响应主动动作不泄密）
+                            uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
                         } else {
-                            prefs.edit().putBoolean("pending_heart", true).apply()
-                            playHeartbeatVibration()
                             showTemporaryStatus("💓 息屏心电感应成功")
                         }
                     }
@@ -454,8 +463,7 @@ class LocationService : Service() {
                 wifiDebounceRunnable = Runnable { triggerSingleLocation(isEmergency = false, forceHttp = true) }
                 syncHandler.postDelayed(wifiDebounceRunnable!!, 3000L)
             } else {
-                // 伪装状态：即便切网了，也只推缓存死地址
-                uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
+                // 🚀 防止泄密：伪装状态下切网（可能出门了），绝对不主动发信号过去！维持死寂。
             }
             val defaultNorm = UserPrefs.getNotifNormal(this@LocationService).ifEmpty { "守护中：网络正常" }
             updateNotification("$defaultNorm ($netType)")
@@ -502,11 +510,14 @@ class LocationService : Service() {
                     } catch (e: Exception) {}
 
                     val timeSinceLastLoc = System.currentTimeMillis() - lastLocationTime
-                    if (timeSinceLastLoc > 5 * 60 * 1000L && state == 0) {
-                        triggerSingleLocation(isEmergency = false, forceHttp = true)
+                    if (state != 0) {
+                        // 🚀 防止泄密：伪装状态下人为息屏，绝对不主动推给对方！防止暴露“刚玩完手机”的事实。
                     } else {
-                        // 伪装状态：不管离上次多久，统统推缓存旧坐标
-                        uploadData(lastLat, lastLng, lastAddr, if (state != 0) "息屏睡眠 💤" else null, forceHttp = true)
+                        if (timeSinceLastLoc > 5 * 60 * 1000L) {
+                            triggerSingleLocation(isEmergency = false, forceHttp = true)
+                        } else {
+                            uploadData(lastLat, lastLng, lastAddr, null, forceHttp = true)
+                        }
                     }
 
                     val constraints = Constraints.Builder()
@@ -544,6 +555,7 @@ class LocationService : Service() {
                     if (timeSinceLastLoc > 5 * 60 * 1000L && currentState == 0) {
                         triggerSingleLocation(isEmergency = false, forceHttp = true)
                     } else {
+                        // 亮屏瞬间由于是正常动作，需要恢复伪装同步以兜底
                         uploadData(lastLat, lastLng, lastAddr, if (currentState != 0) "息屏睡眠 💤" else null, forceHttp = true)
                     }
 
