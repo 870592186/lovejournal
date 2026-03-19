@@ -29,6 +29,7 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <queries>
         <intent>
@@ -98,11 +99,13 @@
             </intent-filter>
         </receiver>
 
-        <receiver
-            android:name=".util.ExternalCommandReceiver"
-            android:exported="true">
+        <receiver android:name=".util.ExternalCommandReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="cn.xtay.lovejournal.ACTION_EXTERNAL_CMD" />
+
+                <action android:name="cn.xtay.lovejournal.ACTION_SET_ADB_MODE" />
+
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 

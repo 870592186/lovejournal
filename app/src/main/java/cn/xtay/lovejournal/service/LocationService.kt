@@ -1,5 +1,6 @@
 package cn.xtay.lovejournal.service
 
+import android.annotation.SuppressLint
 import android.app.*
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -310,15 +311,10 @@ class LocationService : Service() {
                     }
                 }
                 "force_location" -> {
-                    // 🚀 核心优化：收到雷达波，无视一切快速响应！
-                    if (state == 1 || state == 2) {
-                        // 处于深度睡眠，立刻将旧坐标和睡眠状态强制通过 HTTP 发出去
-                        uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = true)
-                    } else {
-                        acquireTempWakeLock()
-                        // 🚀 直接触发紧急定位，并要求定位后立即走 HTTP 同步（供对方 10 秒后拉取）
-                        triggerSingleLocation(isEmergency = true, forceHttp = true)
-                    }
+                    // 🚀 核心改动：只要长连接收到指令，说明线路通畅，无视状态直接拉起紧急定位响应！
+                    // （如果长连接断了，服务端会自己回复“对方已休眠”，客户端根本收不到这个指令）
+                    acquireTempWakeLock()
+                    triggerSingleLocation(isEmergency = true, forceHttp = true)
                 }
                 "low_battery_alert" -> {
                     val msg = if (data.contains("msg")) JSONObject(data).optString("msg") else "TA的手机电量严重不足！"
@@ -506,6 +502,7 @@ class LocationService : Service() {
                         uploadData(lastLat, lastLng, lastAddr, if (state != 0) "息屏睡眠 💤" else null, forceHttp = true)
                     }
 
+                    // 🚀 核心逻辑统一：息屏后必然挂载系统窗口 (WorkManager)
                     val constraints = Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
                         .build()
@@ -574,6 +571,8 @@ class LocationService : Service() {
         isRunning = true
         isScreenOn = (getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive
 
+        lastLocationTime = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getLong("last_location_time", 0L)
+
         createNotificationChannel()
 
         val mainNotification = createNotification("守护引擎初始化中...")
@@ -608,6 +607,13 @@ class LocationService : Service() {
             return START_STICKY
         }
 
+        if (intent?.action == "ACTION_WAKEUP_FROM_GHOST") {
+            // 虽然放弃了 ADB 特权，但如果有极端的防断网唤醒手段（如企业微信），依然允许拉起单次紧急定位
+            acquireTempWakeLock(15000L)
+            triggerSingleLocation(isEmergency = true, forceHttp = true)
+            return START_STICKY
+        }
+
         if (intent?.action == "ACTION_WORKER_SYNC") {
             if (DeviceUtil.getNetworkInfo(this).first == "无网络") return START_STICKY
 
@@ -639,20 +645,12 @@ class LocationService : Service() {
                             sharedOkHttpClient.newCall(request).execute().use {}
                         } catch (e: Exception) { e.printStackTrace() }
                     }.start()
-
-                    if (prefs.getInt("dev_sleep_state", 0) != 0) uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤")
-                    else uploadData(lastLat, lastLng, lastAddr, null)
                 }
             }
 
-            val currentState = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
-            if (currentState == 0) {
-                val timeSinceLastLoc = System.currentTimeMillis() - lastLocationTime
-                if (timeSinceLastLoc > 5 * 60 * 1000L) triggerSingleLocation(isEmergency = false, forceHttp = false)
-                else uploadData(lastLat, lastLng, lastAddr, null)
-            } else {
-                uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤")
-            }
+            // 🚀 核心：当系统窗口（WorkManager）被调度时，我们强制执行一次真正的高精度定位并上报！
+            triggerSingleLocation(isEmergency = true, forceHttp = true)
+
         }
         return START_STICKY
     }
@@ -682,6 +680,11 @@ class LocationService : Service() {
                             lastLng = location.longitude
                             lastAddr = location.address ?: ""
                             lastLocationTime = System.currentTimeMillis()
+
+                            getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+                                .edit()
+                                .putLong("last_location_time", lastLocationTime)
+                                .apply()
                         }
 
                         val currentState = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
@@ -689,6 +692,7 @@ class LocationService : Service() {
                         val useHttp = pendingHttpSyncOnLocation
                         pendingHttpSyncOnLocation = false
 
+                        // 无论如何唤醒的，只要在息屏伪装状态，必定带上“息屏睡眠”标志
                         if (currentState != 0) {
                             uploadData(lastLat, lastLng, lastAddr, "息屏睡眠 💤", forceHttp = useHttp)
                         } else {
@@ -726,8 +730,11 @@ class LocationService : Service() {
     }
 
     private val locationRunnable = Runnable {
-        val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
-        if (state != 0) {
+        val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+        val state = prefs.getInt("dev_sleep_state", 0)
+
+        // 🚀 简化拦截逻辑：如果处于睡眠状态，【仅允许】通过 isEmergency=true 的紧急请求（来自长连接或系统窗口）
+        if (state != 0 && !isEmergencyLocation) {
             isEmergencyLocation = false
             isGpsRetry = false
             return@Runnable
@@ -748,10 +755,8 @@ class LocationService : Service() {
                 } else {
                     if (isGpsRetry || isFallbackToGps || isEmergencyLocation) {
                         locationMode = AMapLocationClientOption.AMapLocationMode.Hight_Accuracy
-                        // 🚀 核心优化：取消 GPS 优先，不要死等卫星。室内 Wi-Fi/基站定位几百毫秒就出结果。
                         isGpsFirst = false
                         isOnceLocationLatest = true
-                        // 🚀 核心优化：紧急定位超时压缩到 5 秒，平时 15 秒
                         httpTimeOut = if (isEmergencyLocation) 5000 else 15000
                     } else {
                         locationMode = AMapLocationClientOption.AMapLocationMode.Battery_Saving
@@ -768,8 +773,13 @@ class LocationService : Service() {
     }
 
     private fun triggerSingleLocation(isEmergency: Boolean = false, forceHttp: Boolean = false) {
-        val state = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getInt("dev_sleep_state", 0)
-        if (state != 0) return
+        val prefs = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE)
+        val state = prefs.getInt("dev_sleep_state", 0)
+
+        // 🚀 简化拦截逻辑：同上，睡眠状态下仅放行紧急调用
+        if (state != 0 && !isEmergency) {
+            return
+        }
 
         this.isEmergencyLocation = isEmergency
         this.pendingHttpSyncOnLocation = forceHttp
@@ -778,7 +788,6 @@ class LocationService : Service() {
         syncHandler.removeCallbacks(locationRunnable)
         mLocationClient?.stopLocation()
 
-        // 🚀 核心优化：如果是雷达波触发的紧急唤醒，直接0毫秒延迟立刻跑，不等那500ms
         val delay = if (isEmergency) 0L else 500L
         syncHandler.postDelayed(locationRunnable, delay)
     }
@@ -880,7 +889,34 @@ class LocationService : Service() {
         if (tempWakeLock?.isHeld == true) tempWakeLock?.release()
         super.onDestroy()
     }
+    // 🚀 核心防刺杀机制：监控到用户“划掉卡片”的瞬间
+    @SuppressLint("ScheduleExactAlarm")
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
 
+        try {
+            // 发现自己被划掉，立刻向系统定一个 1.5 秒后拉起自己的闹钟！
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val restartIntent = Intent(applicationContext, LocationService::class.java).apply {
+                action = "ACTION_RESTART_FROM_KILL"
+            }
+            val pendingIntent = PendingIntent.getService(
+                applicationContext,
+                1002,
+                restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            // 用最强硬的闹钟类型
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + 1500,
+                pendingIntent
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
     private fun createNotification(content: String): Notification {
         val isStealth = getSharedPreferences("love_journal_prefs", Context.MODE_PRIVATE).getBoolean("is_stealth_enabled", false)
         val intent = if (isStealth) {
